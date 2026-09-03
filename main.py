@@ -11,8 +11,9 @@ from dotenv import load_dotenv
 from pypresence import Presence
 from pypresence.exceptions import DiscordError, DiscordNotFound, PipeClosed
 
+import webbrowser
+from infi.systray import SysTrayIcon
 from rpc_client import GridcoinRPC
-from tray_helper import PureWindowsTray
 
 # Set base directory to the script's location
 BASE_DIR = Path(__file__).resolve().parent
@@ -361,15 +362,30 @@ def main():
     worker_thread = threading.Thread(target=polling_worker, args=(grc, discord_mgr), daemon=True)
     worker_thread.start()
 
+    def get_icon_file_path() -> Optional[str]:
+        if hasattr(sys, "_MEIPASS"):
+            p = Path(sys._MEIPASS) / "app_icon.ico"
+            if p.is_file():
+                return str(p)
+        p = BASE_DIR / "app_icon.ico"
+        if p.is_file():
+            return str(p)
+        return None
+
     # System tray callbacks
-    def on_tray_toggle(enabled: bool):
+    def on_tray_toggle(systray):
         global presence_enabled, discord_mgr
-        presence_enabled = enabled
-        logger.info(f"Presence {'enabled' if enabled else 'paused'} via system tray.")
-        if not enabled and discord_mgr:
+        presence_enabled = not presence_enabled
+        state_msg = "enabled" if presence_enabled else "paused"
+        logger.info(f"Presence {state_msg} via system tray.")
+        if not presence_enabled and discord_mgr:
             discord_mgr.clear()
 
-    def on_tray_exit():
+    def on_tray_github(systray):
+        if GITHUB_REPO_URL:
+            webbrowser.open(GITHUB_REPO_URL)
+
+    def on_tray_quit(systray):
         global running, discord_mgr
         logger.info("Exiting application via system tray.")
         running = False
@@ -378,18 +394,27 @@ def main():
 
     tray = None
     if sys.platform == "win32":
-        try:
-            tray = PureWindowsTray("Gridcoin Discord RPC", on_tray_toggle, on_tray_exit)
-            tray.start()
-        except Exception as err:
-            logger.warning(f"Could not start system tray: {err}")
+        icon_path = get_icon_file_path()
+        if icon_path:
+            menu_options = (
+                ("Turn Off / On Presence", None, on_tray_toggle),
+                ("GitHub Repository", None, on_tray_github),
+            )
+            try:
+                tray = SysTrayIcon(icon_path, "Gridcoin Discord RPC", menu_options, on_quit=on_tray_quit)
+                tray.start()
+            except Exception as err:
+                logger.warning(f"Could not start system tray: {err}")
 
     try:
         while running:
             time.sleep(1)
     finally:
         if tray:
-            tray.stop()
+            try:
+                tray.shutdown()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
