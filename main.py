@@ -86,14 +86,21 @@ def format_details(active_coins: float) -> str:
 
 
 def get_expected_reward(mining_info: dict) -> float:
-    """Calculate expected stake reward: 10 GRC CBR + pending BOINC reward."""
+    """Extract expected research reward from BoincRewardPending (matches wallet GUI).
+
+    Falls back to 10.0 GRC CBR for investors without pending BOINC rewards.
+    """
     if not isinstance(mining_info, dict):
         return 10.0
-    pending = mining_info.get("BoincRewardPending") or 0.0
-    try:
-        return 10.0 + float(pending)
-    except (ValueError, TypeError):
-        return 10.0
+    pending = mining_info.get("BoincRewardPending")
+    if pending is not None:
+        try:
+            val = float(pending)
+            if val > 0:
+                return val
+        except (ValueError, TypeError):
+            pass
+    return 10.0
 
 
 def format_reward(reward: float) -> str:
@@ -120,6 +127,7 @@ def get_last_stake_timestamp(grc: GridcoinRPC, count: int = 100) -> Optional[int
             for tx in txs
             if isinstance(tx, dict)
             and tx.get("category") in ("generate", "immature", "stake")
+            and tx.get("confirmations", 0) >= 0
         ]
         if stake_txs:
             latest_tx = max(

@@ -49,9 +49,9 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(format_details(-10.0), "Staking: 0.00 GRC")
 
     def test_expected_reward(self):
-        # 1. With pending BOINC reward
-        self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1287.37}), 1297.37)
-        self.assertEqual(format_reward(1297.37), "Est. Reward: 1,297.37 GRC")
+        # 1. With pending BOINC reward (matches wallet GUI)
+        self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1289.53}), 1289.53)
+        self.assertEqual(format_reward(1289.53), "Est. Reward: 1,289.53 GRC")
 
         # 2. Investor mode (no pending BOINC reward -> default 10 CBR)
         self.assertEqual(get_expected_reward({"BoincRewardPending": 0.0}), 10.0)
@@ -101,6 +101,15 @@ class TestGridcoinDaemon(unittest.TestCase):
         ]
         ts = get_last_stake_timestamp(mock_grc)
         self.assertEqual(ts, 1700000600)
+
+    def test_get_last_stake_timestamp_ignores_orphaned_blocks(self):
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.return_value = [
+            {"category": "generate", "amount": 10, "time": 1700000500, "confirmations": 10},
+            {"category": "generate", "amount": 10, "time": 1700001000, "confirmations": -1},
+        ]
+        ts = get_last_stake_timestamp(mock_grc)
+        self.assertEqual(ts, 1700000500)
 
     def test_get_last_stake_timestamp_empty(self):
         mock_grc = MagicMock(spec=GridcoinRPC)
