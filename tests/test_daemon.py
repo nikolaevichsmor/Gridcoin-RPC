@@ -123,6 +123,45 @@ class TestGridcoinDaemon(unittest.TestCase):
         mock_grc.call.return_value = []
         self.assertIsNone(get_last_stake_timestamp(mock_grc))
 
+    def test_get_last_stake_timestamp_fallback_500(self):
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.side_effect = [
+            [{"category": "receive", "amount": 10, "time": 1700000100}],
+            [{"category": "stake", "amount": 10, "time": 1700000999, "confirmations": 5}],
+        ]
+        ts = get_last_stake_timestamp(mock_grc, count=100)
+        self.assertEqual(ts, 1700000999)
+        self.assertEqual(mock_grc.call.call_count, 2)
+
+    def test_auto_detect_rpc_credentials_with_comments(self):
+        conf_content = """
+        # Global settings
+        ; Semicolon comment
+        rpcuser = test_user # inline comment
+        rpcpassword = test_pass ; inline semicolon comment
+        rpcport = 15716 # custom port
+        """
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
+            f.write(conf_content)
+            temp_path = Path(f.name)
+
+        try:
+            with patch("main.find_gridcoin_conf", return_value=temp_path):
+                with patch("main.RPC_USER", ""):
+                    with patch("main.RPC_PASS", ""):
+                        with patch("main.RPC_PORT", 15715):
+                            from main import auto_detect_rpc_credentials
+                            import main
+                            auto_detect_rpc_credentials()
+                            self.assertEqual(main.RPC_USER, "test_user")
+                            self.assertEqual(main.RPC_PASS, "test_pass")
+                            self.assertEqual(main.RPC_PORT, 15716)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    def test_get_last_stake_timestamp_error(self):
+        mock_grc = MagicMock(spec=GridcoinRPC)
         mock_grc.call.side_effect = ConnectionError("Node unreachable")
         self.assertIsNone(get_last_stake_timestamp(mock_grc))
 

@@ -105,7 +105,12 @@ def auto_detect_rpc_credentials():
         with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
+                if not line or line.startswith("#") or line.startswith(";"):
+                    continue
+                for comment_char in ("#", ";"):
+                    if comment_char in line:
+                        line = line.split(comment_char, 1)[0].strip()
+                if "=" not in line:
                     continue
                 k, v = line.split("=", 1)
                 k = k.strip().lower()
@@ -191,28 +196,30 @@ def format_magnitude(raw_mag: Any) -> str:
 
 def get_last_stake_timestamp(grc: GridcoinRPC, count: int = 100) -> Optional[int]:
     """Retrieve timestamp of the latest confirmed stake transaction from listtransactions."""
-    try:
-        txs = grc.call("listtransactions", ["*", count])
-        if not isinstance(txs, list):
-            return None
+    for query_count in (count, 500) if count < 500 else (count,):
+        try:
+            txs = grc.call("listtransactions", ["*", query_count])
+            if not isinstance(txs, list):
+                continue
 
-        stake_txs = [
-            tx
-            for tx in txs
-            if isinstance(tx, dict)
-            and tx.get("category") in ("generate", "immature", "stake")
-            and tx.get("confirmations", 0) >= 0
-        ]
-        if stake_txs:
-            latest_tx = max(
-                stake_txs,
-                key=lambda x: x.get("blocktime") or x.get("time") or 0,
-            )
-            timestamp = latest_tx.get("blocktime") or latest_tx.get("time")
-            if timestamp is not None:
-                return int(timestamp)
-    except Exception as err:
-        logger.warning(f"Failed to fetch last stake transaction: {err}")
+            stake_txs = [
+                tx
+                for tx in txs
+                if isinstance(tx, dict)
+                and tx.get("category") in ("generate", "immature", "stake")
+                and tx.get("confirmations", 0) >= 0
+            ]
+            if stake_txs:
+                latest_tx = max(
+                    stake_txs,
+                    key=lambda x: x.get("blocktime") or x.get("time") or 0,
+                )
+                timestamp = latest_tx.get("blocktime") or latest_tx.get("time")
+                if timestamp is not None:
+                    return int(timestamp)
+        except Exception as err:
+            logger.warning(f"Failed to fetch last stake transaction: {err}")
+            break
 
     return None
 
