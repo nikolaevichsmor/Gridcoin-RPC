@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
-import requests
+import json
 
 from main import (
     format_details,
@@ -121,30 +121,28 @@ class TestGridcoinDaemon(unittest.TestCase):
 
     def test_rpc_client_success(self):
         client = GridcoinRPC("127.0.0.1", 15715, "user", "pass")
-        with patch.object(client.session, "post") as mock_post:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"result": {"version": 50000}, "error": None}
-            mock_resp.raise_for_status.return_value = None
-            mock_post.return_value = mock_resp
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"result": {"version": 50000}, "error": None}).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
 
+        with patch("urllib.request.urlopen", return_value=mock_resp):
             res = client.call("getinfo")
             self.assertEqual(res, {"version": 50000})
 
     def test_rpc_client_error_response(self):
         client = GridcoinRPC("127.0.0.1", 15715, "user", "pass")
-        with patch.object(client.session, "post") as mock_post:
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"result": None, "error": {"code": -1, "message": "Method not found"}}
-            mock_resp.raise_for_status.return_value = None
-            mock_post.return_value = mock_resp
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"result": None, "error": {"code": -1, "message": "Method not found"}}).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
 
+        with patch("urllib.request.urlopen", return_value=mock_resp):
             with self.assertRaises(RuntimeError):
                 client.call("nonexistent")
 
     def test_rpc_client_connection_failure(self):
         client = GridcoinRPC("127.0.0.1", 15715, "user", "pass")
-        with patch.object(client.session, "post") as mock_post:
-            mock_post.side_effect = requests.exceptions.ConnectionError("Connection refused")
+        import urllib.error
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
             with self.assertRaises(ConnectionError):
                 client.call("getinfo")
 
