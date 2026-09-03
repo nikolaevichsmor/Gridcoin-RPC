@@ -194,15 +194,15 @@ def main():
             mining_info = grc.call("getmininginfo")
             active_coins = get_active_staking_coins(mining_info)
             expected_reward = get_expected_reward(mining_info)
-            details_str = f"{format_details(active_coins)}\n{format_reward(expected_reward)}"
+            details_str = format_details(active_coins)
 
-            # 2. Magnitude (check for null or 0, fallback to current_magnitude if magnitude is missing)
+            # 2. Estimated Reward & Magnitude (separated by bullet)
             raw_mag = None
             if isinstance(mining_info, dict):
                 raw_mag = mining_info.get("magnitude")
                 if raw_mag is None:
                     raw_mag = mining_info.get("current_magnitude")
-            state_str = format_magnitude(raw_mag)
+            state_str = f"{format_reward(expected_reward)} • {format_magnitude(raw_mag)}"
 
             # 3. Check for last stake timestamp every 60 seconds
             current_time = time.time()

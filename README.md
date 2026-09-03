@@ -16,8 +16,7 @@ A lightweight, resilient Python daemon that displays your live **Gridcoin** stak
 |  Playing a game                                  |
 |  [Gridcoin Icon]  Gridcoin                       |
 |                   Staking: 59,468.15 GRC         |
-|                   Est. Reward: 1,297.37 GRC      |
-|                   Magnitude: 181                 |
+|                   Est. Reward: 1,298.02 GRC • Mag: 181 |
 |                   159:04:33 elapsed              |
 |                                                  |
 |                   [ GitHub ]                     |
