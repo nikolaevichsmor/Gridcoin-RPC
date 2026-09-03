@@ -43,8 +43,8 @@ RPC_HOST = os.getenv("RPC_HOST", "127.0.0.1")
 RPC_PORT = int(os.getenv("RPC_PORT", "15715"))
 POLL_INTERVAL = max(int(os.getenv("UPDATE_INTERVAL", "15")), 15)
 
-GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC").strip()
-GITHUB_BUTTON_LABEL = os.getenv("GITHUB_BUTTON_LABEL", "GitHub").strip()
+GITHUB_REPO_URL = "https://github.com/nikolaevichsmor/Gridcoin-RPC"
+GITHUB_BUTTON_LABEL = "GitHub"
 
 # Global state for tray and single instance
 _lock_socket = None

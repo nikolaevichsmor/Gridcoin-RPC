@@ -107,10 +107,6 @@ RPC_PORT=15715
 
 # Polling interval in seconds (minimum 15 to respect Discord rate limits)
 UPDATE_INTERVAL=15
-
-# Discord Rich Presence Button
-GITHUB_REPO_URL=https://github.com/nikolaevichsmor/Gridcoin-RPC
-GITHUB_BUTTON_LABEL=GitHub
 ```
 
 ### Environment Variables
@@ -118,13 +114,11 @@ GITHUB_BUTTON_LABEL=GitHub
 | Variable | Description | Default |
 | :--- | :--- | :--- |
 | `DISCORD_CLIENT_ID` | Discord Application Client ID | `1545044211945177139` |
-| `RPC_USER` | RPC username from `gridcoinresearch.conf` | *Required* |
-| `RPC_PASSWORD` | RPC password from `gridcoinresearch.conf` | *Required* |
+| `RPC_USER` | RPC username from `gridcoinresearch.conf` | *Auto-detected* |
+| `RPC_PASSWORD` | RPC password from `gridcoinresearch.conf` | *Auto-detected* |
 | `RPC_HOST` | Gridcoin node host address | `127.0.0.1` |
 | `RPC_PORT` | Gridcoin JSON-RPC port | `15715` |
 | `UPDATE_INTERVAL` | Polling frequency in seconds (minimum `15`) | `15` |
-| `GITHUB_REPO_URL` | Destination URL for the profile button | `https://github.com/nikolaevichsmor/Gridcoin-RPC` |
-| `GITHUB_BUTTON_LABEL` | Text displayed on the profile button (max 32 chars) | `GitHub` |
 
 ---
 
