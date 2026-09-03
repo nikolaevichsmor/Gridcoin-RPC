@@ -1,19 +1,18 @@
-import ctypes
 import logging
 import os
 from pathlib import Path
+import socket
 import sys
 import threading
 import time
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw
-import pystray
 from pypresence import Presence
 from pypresence.exceptions import DiscordError, DiscordNotFound, PipeClosed
 
 from rpc_client import GridcoinRPC
+from tray_helper import PureWindowsTray
 
 # Set base directory to the script's location
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,28 +46,21 @@ GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL", "https://github.com/nikolaevichsm
 GITHUB_BUTTON_LABEL = os.getenv("GITHUB_BUTTON_LABEL", "GitHub").strip()
 
 # Global state for tray and single instance
-_mutex_handle = None
+_lock_socket = None
 running = True
 presence_enabled = True
 discord_mgr: Optional["DiscordPresenceManager"] = None
-tray_icon: Optional[pystray.Icon] = None
 
 
-def acquire_single_instance_lock() -> bool:
-    """Ensure only one instance of the application runs at a time on Windows."""
-    global _mutex_handle
-    if sys.platform != "win32":
-        return True
+def acquire_single_instance_lock(port: int = 45715) -> bool:
+    """Ensure only one instance of the application runs at a time via loopback socket."""
+    global _lock_socket
     try:
-        kernel32 = ctypes.windll.kernel32
-        mutex_name = "Global\\GridcoinDiscordRPC_SingleInstanceMutex"
-        _mutex_handle = kernel32.CreateMutexW(None, False, mutex_name)
-        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            return False
+        _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _lock_socket.bind(("127.0.0.1", port))
         return True
-    except Exception as err:
-        logger.warning(f"Could not initialize single instance mutex: {err}")
-        return True
+    except OSError:
+        return False
 
 
 def find_gridcoin_conf() -> Optional[Path]:
@@ -278,54 +270,6 @@ class DiscordPresenceManager:
             self.rpc = None
 
 
-def create_tray_icon_image() -> Image.Image:
-    """Generate a sleek purple Gridcoin tray icon."""
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    # Circle in Gridcoin purple
-    draw.ellipse([2, 2, 61, 61], fill=(123, 31, 162, 255), outline=(171, 71, 188, 255), width=2)
-    # White stylized G
-    draw.arc([14, 14, 49, 49], start=45, end=315, fill=(255, 255, 255, 255), width=6)
-    draw.line([31, 32, 49, 32], fill=(255, 255, 255, 255), width=6)
-    return img
-
-
-def toggle_presence(icon=None, item=None):
-    """Toggle Discord presence on or off."""
-    global presence_enabled, discord_mgr
-    presence_enabled = not presence_enabled
-    state_msg = "enabled" if presence_enabled else "paused"
-    logger.info(f"Presence {state_msg} via system tray.")
-    if not presence_enabled and discord_mgr:
-        discord_mgr.clear()
-
-
-def quit_app(icon=None, item=None):
-    """Cleanly exit application."""
-    global running, discord_mgr
-    logger.info("Exiting application via system tray.")
-    running = False
-    if discord_mgr:
-        discord_mgr.close()
-    if icon:
-        icon.stop()
-
-
-def create_tray_menu():
-    """Create the context menu for system tray."""
-    return pystray.Menu(
-        pystray.MenuItem("Gridcoin Discord RPC", None, enabled=False),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem(
-            lambda item: "Turn Off Presence" if presence_enabled else "Turn On Presence",
-            toggle_presence,
-            default=True,
-        ),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Exit", quit_app),
-    )
-
-
 def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     """Background thread worker that polls Gridcoin RPC and updates Discord."""
     global running, presence_enabled
@@ -399,7 +343,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
 
 
 def main():
-    global discord_mgr, tray_icon
+    global discord_mgr, presence_enabled, running
 
     if not acquire_single_instance_lock():
         logger.warning("Another instance of Gridcoin-RPC is already running. Exiting.")
@@ -417,15 +361,35 @@ def main():
     worker_thread = threading.Thread(target=polling_worker, args=(grc, discord_mgr), daemon=True)
     worker_thread.start()
 
-    # Start system tray icon
+    # System tray callbacks
+    def on_tray_toggle(enabled: bool):
+        global presence_enabled, discord_mgr
+        presence_enabled = enabled
+        logger.info(f"Presence {'enabled' if enabled else 'paused'} via system tray.")
+        if not enabled and discord_mgr:
+            discord_mgr.clear()
+
+    def on_tray_exit():
+        global running, discord_mgr
+        logger.info("Exiting application via system tray.")
+        running = False
+        if discord_mgr:
+            discord_mgr.close()
+
+    tray = None
+    if sys.platform == "win32":
+        try:
+            tray = PureWindowsTray("Gridcoin Discord RPC", on_tray_toggle, on_tray_exit)
+            tray.start()
+        except Exception as err:
+            logger.warning(f"Could not start system tray: {err}")
+
     try:
-        img = create_tray_icon_image()
-        tray_icon = pystray.Icon("gridcoin_rpc", img, "Gridcoin Discord RPC", create_tray_menu())
-        tray_icon.run()
-    except Exception as err:
-        logger.warning(f"System tray unavailable ({err}). Running in background mode.")
         while running:
             time.sleep(1)
+    finally:
+        if tray:
+            tray.stop()
 
 
 if __name__ == "__main__":
