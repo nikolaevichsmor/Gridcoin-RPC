@@ -12,8 +12,6 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 
 ## Preview
 
-![Gridcoin Discord Presence](assets/preview.png)
-
 - **Staking**: Active staking coin balance with thousands separators.
 - **Est. Reward**: Pending researcher reward matching the value shown in your Gridcoin wallet.
 - **Elapsed Timer**: Live timer counting up from your last confirmed stake transaction.
