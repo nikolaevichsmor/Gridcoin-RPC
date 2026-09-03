@@ -66,6 +66,16 @@ def acquire_single_instance_lock(port: int = 45715) -> bool:
 
 def find_gridcoin_conf() -> Optional[Path]:
     """Find default gridcoinresearch.conf location across OSes."""
+    custom_conf = os.getenv("GRIDCOIN_CONF")
+    if custom_conf:
+        p = Path(custom_conf)
+        if p.is_file():
+            return p
+
+    local_conf = BASE_DIR / "gridcoinresearch.conf"
+    if local_conf.is_file():
+        return local_conf
+
     if sys.platform == "win32":
         appdata = os.getenv("APPDATA")
         if appdata:
