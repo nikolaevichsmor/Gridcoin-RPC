@@ -98,7 +98,7 @@ def get_expected_reward(mining_info: dict) -> float:
 
 def format_reward(reward: float) -> str:
     """Format estimated stake reward string."""
-    return f"Reward: {reward:,.2f} GRC"
+    return f"Est. Reward: {reward:,.2f} GRC"
 
 
 def format_magnitude(raw_mag: Any) -> str:
@@ -196,13 +196,8 @@ def main():
             expected_reward = get_expected_reward(mining_info)
             details_str = format_details(active_coins)
 
-            # 2. Estimated Reward & Magnitude (separated by bullet)
-            raw_mag = None
-            if isinstance(mining_info, dict):
-                raw_mag = mining_info.get("magnitude")
-                if raw_mag is None:
-                    raw_mag = mining_info.get("current_magnitude")
-            state_str = f"{format_reward(expected_reward)} • {format_magnitude(raw_mag)}"
+            # 2. Estimated Reward as State
+            state_str = format_reward(expected_reward)
 
             # 3. Check for last stake timestamp every 60 seconds
             current_time = time.time()
