@@ -17,11 +17,16 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-# Configure logging
+# Configure logging (supports both console and hidden pythonw execution)
+log_handlers = [logging.FileHandler(BASE_DIR / "daemon.log", encoding="utf-8")]
+if sys.stdout is not None:
+    log_handlers.append(logging.StreamHandler(sys.stdout))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=log_handlers,
 )
 logger = logging.getLogger("GridcoinDiscordRPC")
 

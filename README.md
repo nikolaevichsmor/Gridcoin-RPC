@@ -130,21 +130,21 @@ GITHUB_BUTTON_LABEL=GitHub
 
 ## Running the Daemon
 
-Start the daemon:
+### Foreground (Terminal)
 
 ```bash
 python main.py
 ```
 
-Expected output:
-```text
-2026-09-03 16:02:55 [INFO] Starting Gridcoin Discord Rich Presence daemon...
-2026-09-03 16:02:55 [INFO] Target node: 127.0.0.1:15715, update interval: 15s
-2026-09-03 16:02:55 [INFO] Successfully connected to Discord IPC.
-2026-09-03 16:02:56 [INFO] Presence updated: [Staking: 59,468.15 GRC] | [Magnitude: 181] | Last Stake: 1787867936
-```
+To stop, press `Ctrl + C`.
 
-To stop the daemon, press `Ctrl + C`.
+### Background (Hidden / No Console Window)
+
+To run silently without keeping a terminal window open:
+
+- **Launch silently**: Double-click `start_background.vbs` or `main.pyw` (or run `pythonw main.py`).
+- **Stop daemon**: Double-click `stop_background.bat`.
+- **Logs**: Activity is logged to `daemon.log` in the project folder.
 
 ---
 
