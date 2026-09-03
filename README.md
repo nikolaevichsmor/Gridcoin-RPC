@@ -11,17 +11,7 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 
 ## Preview
 
-```text
-+--------------------------------------------------+
-|  Playing a game                                  |
-|  [Gridcoin Icon]  Gridcoin                       |
-|                   Staking: 59,468.15 GRC         |
-|                   Est. Reward: 1,289.53 GRC      |
-|                   159:04:33 elapsed              |
-|                                                  |
-|                   [ GitHub ]                     |
-+--------------------------------------------------+
-```
+![Gridcoin Discord Presence](preview.png)
 
 - **Staking**: Active staking coin balance with thousands separators.
 - **Est. Reward**: Pending researcher reward matching the value shown in your Gridcoin wallet.
