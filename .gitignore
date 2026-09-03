@@ -14,3 +14,8 @@ env/
 # Logs
 *.log
 daemon.log
+
+# PyInstaller build outputs
+build/
+dist/
+*.spec

@@ -44,6 +44,56 @@ GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL", "https://github.com/nikolaevichsm
 GITHUB_BUTTON_LABEL = os.getenv("GITHUB_BUTTON_LABEL", "GitHub").strip()
 
 
+def find_gridcoin_conf() -> Optional[Path]:
+    """Find default gridcoinresearch.conf location across OSes."""
+    if sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            conf = Path(appdata) / "GridcoinResearch" / "gridcoinresearch.conf"
+            if conf.is_file():
+                return conf
+    elif sys.platform == "darwin":
+        conf = Path.home() / "Library" / "Application Support" / "GridcoinResearch" / "gridcoinresearch.conf"
+        if conf.is_file():
+            return conf
+    else:
+        conf = Path.home() / ".GridcoinResearch" / "gridcoinresearch.conf"
+        if conf.is_file():
+            return conf
+    return None
+
+
+def auto_detect_rpc_credentials():
+    """Auto-detect RPC credentials from gridcoinresearch.conf if not set in .env."""
+    global RPC_USER, RPC_PASS, RPC_PORT
+    if RPC_USER and RPC_PASS:
+        return
+    conf_path = find_gridcoin_conf()
+    if not conf_path:
+        return
+    try:
+        with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip().lower()
+                v = v.strip().strip('"').strip("'")
+                if k == "rpcuser" and not RPC_USER:
+                    RPC_USER = v
+                elif k == "rpcpassword" and not RPC_PASS:
+                    RPC_PASS = v
+                elif k == "rpcport" and RPC_PORT == 15715:
+                    try:
+                        RPC_PORT = int(v)
+                    except ValueError:
+                        pass
+        logger.info(f"Auto-detected RPC credentials from {conf_path}")
+    except Exception as e:
+        logger.warning(f"Failed reading {conf_path}: {e}")
+
+
 def get_presence_buttons() -> Optional[list]:
     """Return Discord presence button configuration if URL is set."""
     if GITHUB_REPO_URL:
@@ -187,6 +237,7 @@ class DiscordPresenceManager:
 
 def main():
     logger.info("Starting Gridcoin Discord Rich Presence daemon...")
+    auto_detect_rpc_credentials()
     logger.info(f"Target node: {RPC_HOST}:{RPC_PORT}, update interval: {POLL_INTERVAL}s")
 
     grc = GridcoinRPC(RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS)
