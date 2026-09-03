@@ -85,6 +85,22 @@ def format_details(active_coins: float) -> str:
     return f"Staking: {active_coins:,.2f} GRC"
 
 
+def get_expected_reward(mining_info: dict) -> float:
+    """Calculate expected stake reward: 10 GRC CBR + pending BOINC reward."""
+    if not isinstance(mining_info, dict):
+        return 10.0
+    pending = mining_info.get("BoincRewardPending") or 0.0
+    try:
+        return 10.0 + float(pending)
+    except (ValueError, TypeError):
+        return 10.0
+
+
+def format_reward(reward: float) -> str:
+    """Format estimated stake reward string."""
+    return f"Est. Reward: {reward:,.2f} GRC"
+
+
 def format_magnitude(raw_mag: Any) -> str:
     """Format magnitude string. Null, 0, or missing strictly returns 'Magnitude: None'."""
     if raw_mag is None or raw_mag == 0 or raw_mag == "0":
@@ -177,7 +193,8 @@ def main():
             # 1. Fetch mining information
             mining_info = grc.call("getmininginfo")
             active_coins = get_active_staking_coins(mining_info)
-            details_str = format_details(active_coins)
+            expected_reward = get_expected_reward(mining_info)
+            details_str = f"{format_details(active_coins)}\n{format_reward(expected_reward)}"
 
             # 2. Magnitude (check for null or 0, fallback to current_magnitude if magnitude is missing)
             raw_mag = None

@@ -5,7 +5,9 @@ import requests
 from main import (
     format_details,
     format_magnitude,
+    format_reward,
     get_active_staking_coins,
+    get_expected_reward,
     get_last_stake_timestamp,
     get_presence_buttons,
     DiscordPresenceManager,
@@ -45,6 +47,17 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(format_details(1000000.00), "Staking: 1,000,000.00 GRC")
         self.assertEqual(format_details(0.0), "Staking: 0.00 GRC")
         self.assertEqual(format_details(-10.0), "Staking: 0.00 GRC")
+
+    def test_expected_reward(self):
+        # 1. With pending BOINC reward
+        self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1287.37}), 1297.37)
+        self.assertEqual(format_reward(1297.37), "Est. Reward: 1,297.37 GRC")
+
+        # 2. Investor mode (no pending BOINC reward -> default 10 CBR)
+        self.assertEqual(get_expected_reward({"BoincRewardPending": 0.0}), 10.0)
+        self.assertEqual(get_expected_reward({}), 10.0)
+        self.assertEqual(get_expected_reward(None), 10.0)
+        self.assertEqual(format_reward(10.0), "Est. Reward: 10.00 GRC")
 
     def test_magnitude_formatting(self):
         self.assertEqual(format_magnitude(142.5), "Magnitude: 142.5")

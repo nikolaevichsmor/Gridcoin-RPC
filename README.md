@@ -16,6 +16,7 @@ A lightweight, resilient Python daemon that displays your live **Gridcoin** stak
 |  Playing a game                                  |
 |  [Gridcoin Icon]  Gridcoin                       |
 |                   Staking: 59,468.15 GRC         |
+|                   Est. Reward: 1,297.37 GRC      |
 |                   Magnitude: 181                 |
 |                   159:04:33 elapsed              |
 |                                                  |
@@ -24,8 +25,9 @@ A lightweight, resilient Python daemon that displays your live **Gridcoin** stak
 ```
 
 - **App Name / Header**: `Gridcoin` (managed via Discord Application ID).
-- **Details**: Active staking coins with 2 decimal places and thousands separators (e.g. `Staking: 59,468.15 GRC`).
-- **State**: Research magnitude (e.g. `Magnitude: 181`), strictly displayed as `Magnitude: None` if inactive or 0.
+- **Staking**: Active staking coins with 2 decimal places and thousands separators (e.g. `Staking: 59,468.15 GRC`).
+- **Expected Reward**: Estimated reward on next stake: 10 GRC CBR + pending BOINC researcher reward (e.g. `Est. Reward: 1,297.37 GRC`).
+- **Magnitude**: Research magnitude (e.g. `Magnitude: 181`), strictly displayed as `Magnitude: None` if inactive or 0.
 - **Elapsed Timer**: Passes the timestamp of your last stake transaction to Discord's native counter (`159:04:33 elapsed` / `2 days elapsed`).
 - **GitHub Button**: Clickable button linking directly to this repository.
 - **Fail-safe Recovery**: If the Gridcoin node goes offline or restarts, the daemon automatically updates the status to `Wallet Offline` / `Reconnecting...` without crashing, and restores stats as soon as the node is back.
@@ -130,21 +132,25 @@ GITHUB_BUTTON_LABEL=GitHub
 
 ## Running the Daemon
 
-### Foreground (Terminal)
+### Option 1: One-Click Background Scripts (Recommended for Windows)
+
+Quick-action batch scripts are located in the repository root:
+
+- **Start**: Double-click `start_background.bat` (or `start_background.vbs` / `main.pyw`).
+  The daemon runs in the background without keeping a command prompt open.
+- **Stop**: Double-click `stop_background.bat`.
+  Terminates any running background daemon instances cleanly.
+- **Logs**: Real-time activity and RPC status are logged to `daemon.log`.
+
+### Option 2: Foreground Terminal
+
+Run directly from your command prompt or PowerShell:
 
 ```bash
 python main.py
 ```
 
 To stop, press `Ctrl + C`.
-
-### Background (Hidden / No Console Window)
-
-To run silently without keeping a terminal window open:
-
-- **Launch silently**: Double-click `start_background.vbs` or `main.pyw` (or run `pythonw main.py`).
-- **Stop daemon**: Double-click `stop_background.bat`.
-- **Logs**: Activity is logged to `daemon.log` in the project folder.
 
 ---
 
