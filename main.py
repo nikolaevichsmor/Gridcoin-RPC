@@ -35,6 +35,17 @@ RPC_HOST = os.getenv("RPC_HOST", "127.0.0.1")
 RPC_PORT = int(os.getenv("RPC_PORT", "15715"))
 POLL_INTERVAL = max(int(os.getenv("UPDATE_INTERVAL", "15")), 15)
 
+GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC").strip()
+GITHUB_BUTTON_LABEL = os.getenv("GITHUB_BUTTON_LABEL", "GitHub").strip()
+
+
+def get_presence_buttons() -> Optional[list]:
+    """Return Discord presence button configuration if URL is set."""
+    if GITHUB_REPO_URL:
+        label = GITHUB_BUTTON_LABEL[:32] if GITHUB_BUTTON_LABEL else "GitHub"
+        return [{"label": label, "url": GITHUB_REPO_URL}]
+    return None
+
 
 def get_active_staking_coins(mining_info: dict) -> float:
     """Extract active staking coin weight from getmininginfo response.
@@ -190,6 +201,10 @@ def main():
             if last_stake_time:
                 update_payload["start"] = int(last_stake_time)
 
+            buttons = get_presence_buttons()
+            if buttons:
+                update_payload["buttons"] = buttons
+
             discord.update(**update_payload)
             logger.info(
                 f"Presence updated: [{details_str}] | [{state_str}] | "
@@ -198,10 +213,14 @@ def main():
 
         except ConnectionError as rpc_err:
             logger.warning(f"Gridcoin wallet unreachable ({rpc_err}). Setting offline status.")
-            discord.update(
-                details="Wallet Offline",
-                state="Reconnecting...",
-            )
+            offline_payload = {
+                "details": "Wallet Offline",
+                "state": "Reconnecting...",
+            }
+            buttons = get_presence_buttons()
+            if buttons:
+                offline_payload["buttons"] = buttons
+            discord.update(**offline_payload)
         except Exception as err:
             logger.error(f"Unexpected error in main loop: {err}", exc_info=True)
             time.sleep(5)

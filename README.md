@@ -1,63 +1,175 @@
-# Gridcoin Discord Rich Presence Daemon
+# Gridcoin Discord Rich Presence
 
-A lightweight Python daemon that displays Gridcoin staking statistics and magnitude on your Discord profile via Discord Rich Presence (IPC).
+A lightweight, resilient Python daemon that displays your live **Gridcoin** staking balance, research magnitude, and elapsed time since the last stake on your Discord profile via Discord Rich Presence (IPC).
 
-## Features
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Discord Rich Presence](https://img.shields.io/badge/Discord-Rich%20Presence-5865F2.svg)](https://discord.com/)
+[![Gridcoin](https://img.shields.io/badge/Network-Gridcoin-purple.svg)](https://gridcoin.us/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- **Discord Rich Presence Integration**:
-  - **App Name / Header**: `Gridcoin` (via Discord Application ID).
-  - **Details**: Displays current active staking coins with thousands separators and 2 decimal places (e.g. `Staking: 12,450.50 GRC` or `Staking: 0.00 GRC`).
-  - **State**: Displays magnitude (e.g. `Magnitude: 142.5`). Strictly displays `Magnitude: None` if magnitude is 0, null, or missing.
-  - **Elapsed Timer**: Passes the Unix timestamp of the last stake transaction into Discord IPC (`start`), so Discord automatically counts elapsed time (e.g. `04:12:35 elapsed` or `2 days elapsed`).
-  - **Clean Profile**: No mandatory custom image assets.
-- **Resilient Polling & Reconnection**:
-  - Polls every 15 seconds (respects Discord IPC rate limit).
-  - Caches and periodically checks for the latest stake transaction (`category` in `generate`, `immature`, `stake`).
-  - Graceful fallback: If the Gridcoin node is unreachable, the presence automatically switches to `Wallet Offline` / `Reconnecting...` without crashing.
-  - Automatically reconnects if Discord is launched after the daemon or restarted.
+---
 
-## Requirements
+## Preview
 
-- Python 3.8+
-- Gridcoin Research core wallet with RPC enabled (`gridcoinresearchd` or GUI wallet with server enabled)
-- Discord desktop client
+```text
++--------------------------------------------------+
+|  Playing a game                                  |
+|  [Gridcoin Icon]  Gridcoin                       |
+|                   Staking: 59,468.15 GRC         |
+|                   Magnitude: 181                 |
+|                   159:04:33 elapsed              |
+|                                                  |
+|                   [ GitHub ]                     |
++--------------------------------------------------+
+```
+
+- **App Name / Header**: `Gridcoin` (managed via Discord Application ID).
+- **Details**: Active staking coins with 2 decimal places and thousands separators (e.g. `Staking: 59,468.15 GRC`).
+- **State**: Research magnitude (e.g. `Magnitude: 181`), strictly displayed as `Magnitude: None` if inactive or 0.
+- **Elapsed Timer**: Passes the timestamp of your last stake transaction to Discord's native counter (`159:04:33 elapsed` / `2 days elapsed`).
+- **GitHub Button**: Clickable button linking directly to this repository.
+- **Fail-safe Recovery**: If the Gridcoin node goes offline or restarts, the daemon automatically updates the status to `Wallet Offline` / `Reconnecting...` without crashing, and restores stats as soon as the node is back.
+
+---
+
+## Prerequisites
+
+- **Python 3.8** or newer
+- **Discord** desktop application running locally
+- **Gridcoin Research** core wallet (GUI or daemon) with JSON-RPC enabled
+
+---
 
 ## Installation
 
-1. Clone or copy this repository:
-   ```bash
-   git clone https://github.com/nikolaevichsmor/Gridcoin-RPC.git
-	cd Gridcoin-RPC
-   ```
+### 1. Clone the repository
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+git clone https://github.com/nikolaevichsmor/Gridcoin-RPC.git
+cd Gridcoin-RPC
+```
 
-3. Configure environment variables:
-   Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` to match your `gridcoinresearch.conf` settings:
-   ```ini
-   DISCORD_CLIENT_ID=1545044211945177139
-   RPC_USER=your_rpc_username
-   RPC_PASSWORD=your_rpc_password
-   RPC_HOST=127.0.0.1
-   RPC_PORT=15715
-   UPDATE_INTERVAL=15
-   ```
+### 2. Install dependencies
 
-## Usage
+```bash
+pip install -r requirements.txt
+```
 
-Run the daemon:
+---
+
+## Configuration
+
+### 1. Configure Gridcoin Node for RPC
+
+Ensure your `gridcoinresearch.conf` has RPC enabled (`server=1`) and valid credentials:
+
+```ini
+server=1
+rpcuser=your_rpc_username
+rpcpassword=your_rpc_password
+rpcport=15715
+```
+
+Default config locations:
+- **Windows**: `%APPDATA%\GridcoinResearch\gridcoinresearch.conf`
+- **Linux**: `~/.GridcoinResearch/gridcoinresearch.conf`
+- **macOS**: `~/Library/Application Support/GridcoinResearch/gridcoinresearch.conf`
+
+*Note: If you made changes to `gridcoinresearch.conf`, restart your Gridcoin wallet.*
+
+---
+
+### 2. Configure the Daemon (`.env`)
+
+Copy `.env.example` to `.env`:
+
+**On Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+```
+
+**On Linux / macOS:**
+```bash
+cp .env.example .env
+```
+
+Open `.env` in a text editor and fill in your RPC credentials:
+
+```ini
+# Discord Application Client ID (Defaults to pre-registered Gridcoin application)
+DISCORD_CLIENT_ID=1545044211945177139
+
+# Gridcoin RPC Credentials
+RPC_USER=your_rpc_username
+RPC_PASSWORD=your_rpc_password
+RPC_HOST=127.0.0.1
+RPC_PORT=15715
+
+# Polling interval in seconds (minimum 15 to respect Discord rate limits)
+UPDATE_INTERVAL=15
+
+# Discord Rich Presence Button
+GITHUB_REPO_URL=https://github.com/nikolaevichsmor/Gridcoin-RPC
+GITHUB_BUTTON_LABEL=GitHub
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `DISCORD_CLIENT_ID` | Discord Application Client ID | `1545044211945177139` |
+| `RPC_USER` | RPC username from `gridcoinresearch.conf` | *Required* |
+| `RPC_PASSWORD` | RPC password from `gridcoinresearch.conf` | *Required* |
+| `RPC_HOST` | Gridcoin node host address | `127.0.0.1` |
+| `RPC_PORT` | Gridcoin JSON-RPC port | `15715` |
+| `UPDATE_INTERVAL` | Polling frequency in seconds (minimum `15`) | `15` |
+| `GITHUB_REPO_URL` | Destination URL for the profile button | `https://github.com/nikolaevichsmor/Gridcoin-RPC` |
+| `GITHUB_BUTTON_LABEL` | Text displayed on the profile button (max 32 chars) | `GitHub` |
+
+---
+
+## Running the Daemon
+
+Start the daemon:
+
 ```bash
 python main.py
 ```
 
-Run tests:
+Expected output:
+```text
+2026-09-03 16:02:55 [INFO] Starting Gridcoin Discord Rich Presence daemon...
+2026-09-03 16:02:55 [INFO] Target node: 127.0.0.1:15715, update interval: 15s
+2026-09-03 16:02:55 [INFO] Successfully connected to Discord IPC.
+2026-09-03 16:02:56 [INFO] Presence updated: [Staking: 59,468.15 GRC] | [Magnitude: 181] | Last Stake: 1787867936
+```
+
+To stop the daemon, press `Ctrl + C`.
+
+---
+
+## Testing
+
+A comprehensive unit test suite is included:
+
 ```bash
 python -m unittest test_daemon.py
 ```
+
+---
+
+## Notes & FAQ
+
+> [!NOTE]
+> **Discord Button Clicking**:
+> By design in Discord, profile buttons cannot be clicked by the owner of the profile inside their own Discord client (Discord disables button interaction on self-cards to prevent accidental clicks). However, the button is **fully clickable and functional for all other Discord users and friends** who view your profile.
+
+> [!TIP]
+> **Discord IPC Rate Limits**:
+> Discord enforces a rate limit on IPC rich presence updates. The daemon automatically enforces a minimum polling interval of 15 seconds (`POLL_INTERVAL >= 15`).
+
+---
+
+## License
+
+This project is open-source and available under the [MIT License](LICENSE).

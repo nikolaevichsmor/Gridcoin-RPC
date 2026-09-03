@@ -7,6 +7,7 @@ from main import (
     format_magnitude,
     get_active_staking_coins,
     get_last_stake_timestamp,
+    get_presence_buttons,
     DiscordPresenceManager,
 )
 from rpc_client import GridcoinRPC
@@ -52,6 +53,19 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(format_magnitude(0.0), "Magnitude: None")
         self.assertEqual(format_magnitude("0"), "Magnitude: None")
         self.assertEqual(format_magnitude(None), "Magnitude: None")
+
+    def test_get_presence_buttons(self):
+        with patch("main.GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC"):
+            with patch("main.GITHUB_BUTTON_LABEL", "GitHub"):
+                buttons = get_presence_buttons()
+                self.assertEqual(
+                    buttons,
+                    [{"label": "GitHub", "url": "https://github.com/nikolaevichsmor/Gridcoin-RPC"}],
+                )
+
+        with patch("main.GITHUB_REPO_URL", ""):
+            buttons = get_presence_buttons()
+            self.assertIsNone(buttons)
 
     def test_get_last_stake_timestamp(self):
         mock_grc = MagicMock(spec=GridcoinRPC)
