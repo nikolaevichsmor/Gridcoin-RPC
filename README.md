@@ -12,7 +12,7 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 
 ## Preview
 
-![Gridcoin Discord Presence](preview.png)
+![Gridcoin Discord Presence](assets/preview.png)
 
 - **Staking**: Active staking coin balance with thousands separators.
 - **Est. Reward**: Pending researcher reward matching the value shown in your Gridcoin wallet.
@@ -63,7 +63,7 @@ pip install -r requirements.txt
   python main.py
   ```
 - **Silent background run (Windows)**:
-  Double-click `start_background.bat`. To stop, double-click `stop_background.bat` or use the tray icon.
+  Double-click `scripts/start_background.bat`. To stop, double-click `scripts/stop_background.bat` or use the tray icon.
 - Logs are written to `daemon.log`.
 
 ---

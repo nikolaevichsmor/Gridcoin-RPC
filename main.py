@@ -373,12 +373,17 @@ def main():
     worker_thread.start()
 
     def get_icon_file_path() -> Optional[str]:
-        for name in ("tray_icon.ico", "app_icon.ico"):
+        for rel_path in (
+            "assets/tray_icon.ico",
+            "tray_icon.ico",
+            "assets/app_icon.ico",
+            "app_icon.ico",
+        ):
             if hasattr(sys, "_MEIPASS"):
-                p = Path(sys._MEIPASS) / name
+                p = Path(sys._MEIPASS) / rel_path
                 if p.is_file():
                     return str(p)
-            p = BASE_DIR / name
+            p = BASE_DIR / rel_path
             if p.is_file():
                 return str(p)
         return None
