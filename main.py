@@ -363,13 +363,14 @@ def main():
     worker_thread.start()
 
     def get_icon_file_path() -> Optional[str]:
-        if hasattr(sys, "_MEIPASS"):
-            p = Path(sys._MEIPASS) / "app_icon.ico"
+        for name in ("tray_icon.ico", "app_icon.ico"):
+            if hasattr(sys, "_MEIPASS"):
+                p = Path(sys._MEIPASS) / name
+                if p.is_file():
+                    return str(p)
+            p = BASE_DIR / name
             if p.is_file():
                 return str(p)
-        p = BASE_DIR / "app_icon.ico"
-        if p.is_file():
-            return str(p)
         return None
 
     # System tray callbacks
