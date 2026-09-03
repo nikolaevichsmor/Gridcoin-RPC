@@ -1,6 +1,6 @@
 # Gridcoin Discord Rich Presence
 
-A lightweight, resilient Python daemon that displays your live **Gridcoin** staking balance, research magnitude, and elapsed time since the last stake on your Discord profile via Discord Rich Presence (IPC).
+A lightweight, resilient Python daemon that displays your live **Gridcoin** staking balance, estimated reward, and elapsed time since the last stake on your Discord profile via Discord Rich Presence (IPC).
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Discord Rich Presence](https://img.shields.io/badge/Discord-Rich%20Presence-5865F2.svg)](https://discord.com/)
@@ -134,10 +134,11 @@ GITHUB_BUTTON_LABEL=GitHub
 
 Download `Gridcoin-RPC.exe` from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases):
 - Double-click `Gridcoin-RPC.exe` to run.
-- **Single Instance**: Protected by a native Windows mutex—opening it multiple times will not spawn duplicates.
+- **Single Instance**: Opening it multiple times will not spawn duplicates.
 - **System Tray Icon**: An icon appears in your Windows system tray (near the clock):
-  - **Turn Off / Turn On Presence**: Toggle presence broadcast without quitting.
-  - **Exit**: Cleanly removes presence from Discord and terminates the process.
+  - **Turn Off / On Presence**: Toggle presence broadcast without quitting.
+  - **GitHub Repository**: Quick link to project source.
+  - **Quit**: Cleanly removes presence from Discord and terminates the process.
 
 ### Option 2: One-Click Background Scripts
 
