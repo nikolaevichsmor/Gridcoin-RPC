@@ -1,7 +1,8 @@
 ﻿import ctypes
 from ctypes import wintypes
-import threading
+from pathlib import Path
 import sys
+import threading
 
 user32 = ctypes.windll.user32
 shell32 = ctypes.windll.shell32
@@ -15,6 +16,8 @@ NIM_DELETE = 0x00000002
 NIF_MESSAGE = 0x00000001
 NIF_ICON = 0x00000002
 NIF_TIP = 0x00000004
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x00000010
 IDI_APPLICATION = 32512
 
 WM_RBUTTONUP = 0x0205
@@ -28,6 +31,28 @@ TPM_RIGHTBUTTON = 0x0002
 ID_TITLE = 1001
 ID_TOGGLE = 1002
 ID_EXIT = 1003
+
+# Configure ctypes function signatures for 64-bit Windows
+user32.CreatePopupMenu.restype = wintypes.HMENU
+user32.DestroyMenu.argtypes = [wintypes.HMENU]
+user32.DestroyMenu.restype = wintypes.BOOL
+user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_uint64, wintypes.LPCWSTR]
+user32.AppendMenuW.restype = wintypes.BOOL
+user32.TrackPopupMenu.argtypes = [
+    wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HWND, ctypes.c_void_p
+]
+user32.TrackPopupMenu.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
+user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.PostMessageW.restype = wintypes.BOOL
+user32.LoadImageW.argtypes = [
+    wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT
+]
+user32.LoadImageW.restype = wintypes.HANDLE
+user32.LoadIconW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+user32.LoadIconW.restype = wintypes.HICON
+
 
 class NOTIFYICONDATAW(ctypes.Structure):
     _fields_ = [
@@ -46,7 +71,9 @@ class NOTIFYICONDATAW(ctypes.Structure):
         ("dwInfoFlags", wintypes.DWORD),
     ]
 
+
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_long, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
 
 class WNDCLASSEXW(ctypes.Structure):
     _fields_ = [
@@ -63,6 +90,19 @@ class WNDCLASSEXW(ctypes.Structure):
         ("lpszClassName", wintypes.LPCWSTR),
         ("hIconSm", wintypes.HICON),
     ]
+
+
+def _get_icon_file_path() -> str:
+    """Find path to app_icon.ico in PyInstaller bundle or project root."""
+    if hasattr(sys, "_MEIPASS"):
+        p = Path(sys._MEIPASS) / "app_icon.ico"
+        if p.is_file():
+            return str(p)
+    p = Path(__file__).resolve().parent / "app_icon.ico"
+    if p.is_file():
+        return str(p)
+    return ""
+
 
 class PureWindowsTray:
     def __init__(self, tooltip: str, on_toggle, on_exit):
@@ -88,7 +128,7 @@ class PureWindowsTray:
         if self.hwnd and self.nid:
             try:
                 shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self.nid))
-                user32.PostMessageW(self.hwnd, 0x0012, 0, 0)
+                user32.PostMessageW(self.hwnd, 0x0012, 0, 0)  # WM_QUIT
             except Exception:
                 pass
 
@@ -145,10 +185,19 @@ class PureWindowsTray:
             user32.RegisterClassExW(ctypes.byref(wndclass))
 
             self.hwnd = user32.CreateWindowExW(
-                0, class_name, "GridcoinTray", 0, 0, 0, 0, 0, 0, 0, hinst, None
+                0, class_name, "GridcoinTrayWindow", 0, 0, 0, 0, 0, 0, 0, hinst, None
             )
 
-            hicon = user32.LoadIconW(0, IDI_APPLICATION)
+            # Load custom icon
+            hicon = None
+            icon_file = _get_icon_file_path()
+            if icon_file:
+                hicon = user32.LoadImageW(None, icon_file, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+            if not hicon:
+                hicon = user32.LoadIconW(hinst, ctypes.cast(1, wintypes.LPCWSTR))
+            if not hicon:
+                hicon = user32.LoadIconW(0, ctypes.cast(IDI_APPLICATION, wintypes.LPCWSTR))
+
             self.nid = NOTIFYICONDATAW()
             self.nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
             self.nid.hWnd = self.hwnd
