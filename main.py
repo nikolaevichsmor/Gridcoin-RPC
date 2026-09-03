@@ -1,16 +1,19 @@
+import ctypes
 import logging
 import os
+from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any, Optional
 
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw
+import pystray
 from pypresence import Presence
 from pypresence.exceptions import DiscordError, DiscordNotFound, PipeClosed
 
 from rpc_client import GridcoinRPC
-
-from pathlib import Path
 
 # Set base directory to the script's location
 BASE_DIR = Path(__file__).resolve().parent
@@ -42,6 +45,30 @@ POLL_INTERVAL = max(int(os.getenv("UPDATE_INTERVAL", "15")), 15)
 
 GITHUB_REPO_URL = os.getenv("GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC").strip()
 GITHUB_BUTTON_LABEL = os.getenv("GITHUB_BUTTON_LABEL", "GitHub").strip()
+
+# Global state for tray and single instance
+_mutex_handle = None
+running = True
+presence_enabled = True
+discord_mgr: Optional["DiscordPresenceManager"] = None
+tray_icon: Optional[pystray.Icon] = None
+
+
+def acquire_single_instance_lock() -> bool:
+    """Ensure only one instance of the application runs at a time on Windows."""
+    global _mutex_handle
+    if sys.platform != "win32":
+        return True
+    try:
+        kernel32 = ctypes.windll.kernel32
+        mutex_name = "Global\\GridcoinDiscordRPC_SingleInstanceMutex"
+        _mutex_handle = kernel32.CreateMutexW(None, False, mutex_name)
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            return False
+        return True
+    except Exception as err:
+        logger.warning(f"Could not initialize single instance mutex: {err}")
+        return True
 
 
 def find_gridcoin_conf() -> Optional[Path]:
@@ -103,10 +130,7 @@ def get_presence_buttons() -> Optional[list]:
 
 
 def get_active_staking_coins(mining_info: dict) -> float:
-    """Extract active staking coin weight from getmininginfo response.
-
-    Checks 'stakeweight' -> 'valuesum', 'value', 'legacy', or direct float.
-    """
+    """Extract active staking coin weight from getmininginfo response."""
     if not isinstance(mining_info, dict):
         return 0.0
 
@@ -136,10 +160,7 @@ def format_details(active_coins: float) -> str:
 
 
 def get_expected_reward(mining_info: dict) -> float:
-    """Extract expected research reward from BoincRewardPending (matches wallet GUI).
-
-    Falls back to 10.0 GRC CBR for investors without pending BOINC rewards.
-    """
+    """Extract expected research reward from BoincRewardPending (matches wallet GUI)."""
     if not isinstance(mining_info, dict):
         return 10.0
     pending = mining_info.get("BoincRewardPending")
@@ -166,7 +187,7 @@ def format_magnitude(raw_mag: Any) -> str:
 
 
 def get_last_stake_timestamp(grc: GridcoinRPC, count: int = 100) -> Optional[int]:
-    """Retrieve timestamp of the latest stake transaction from listtransactions."""
+    """Retrieve timestamp of the latest confirmed stake transaction from listtransactions."""
     try:
         txs = grc.call("listtransactions", ["*", count])
         if not isinstance(txs, list):
@@ -234,20 +255,88 @@ class DiscordPresenceManager:
             self.rpc = None
             return False
 
+    def clear(self) -> bool:
+        if self.connected and self.rpc:
+            try:
+                self.rpc.clear()
+                return True
+            except Exception as err:
+                logger.warning(f"Error clearing presence: {err}")
+        return False
 
-def main():
-    logger.info("Starting Gridcoin Discord Rich Presence daemon...")
-    auto_detect_rpc_credentials()
-    logger.info(f"Target node: {RPC_HOST}:{RPC_PORT}, update interval: {POLL_INTERVAL}s")
+    def close(self):
+        if self.rpc:
+            try:
+                self.rpc.clear()
+            except Exception:
+                pass
+            try:
+                self.rpc.close()
+            except Exception:
+                pass
+            self.connected = False
+            self.rpc = None
 
-    grc = GridcoinRPC(RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS)
-    discord = DiscordPresenceManager(CLIENT_ID)
-    discord.connect()
 
+def create_tray_icon_image() -> Image.Image:
+    """Generate a sleek purple Gridcoin tray icon."""
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    # Circle in Gridcoin purple
+    draw.ellipse([2, 2, 61, 61], fill=(123, 31, 162, 255), outline=(171, 71, 188, 255), width=2)
+    # White stylized G
+    draw.arc([14, 14, 49, 49], start=45, end=315, fill=(255, 255, 255, 255), width=6)
+    draw.line([31, 32, 49, 32], fill=(255, 255, 255, 255), width=6)
+    return img
+
+
+def toggle_presence(icon=None, item=None):
+    """Toggle Discord presence on or off."""
+    global presence_enabled, discord_mgr
+    presence_enabled = not presence_enabled
+    state_msg = "enabled" if presence_enabled else "paused"
+    logger.info(f"Presence {state_msg} via system tray.")
+    if not presence_enabled and discord_mgr:
+        discord_mgr.clear()
+
+
+def quit_app(icon=None, item=None):
+    """Cleanly exit application."""
+    global running, discord_mgr
+    logger.info("Exiting application via system tray.")
+    running = False
+    if discord_mgr:
+        discord_mgr.close()
+    if icon:
+        icon.stop()
+
+
+def create_tray_menu():
+    """Create the context menu for system tray."""
+    return pystray.Menu(
+        pystray.MenuItem("Gridcoin Discord RPC", None, enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            lambda item: "Turn Off Presence" if presence_enabled else "Turn On Presence",
+            toggle_presence,
+            default=True,
+        ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Exit", quit_app),
+    )
+
+
+def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
+    """Background thread worker that polls Gridcoin RPC and updates Discord."""
+    global running, presence_enabled
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
 
-    while True:
+    while running:
+        if not presence_enabled:
+            time.sleep(1)
+            continue
+
         try:
             # 1. Fetch mining information
             mining_info = grc.call("getmininginfo")
@@ -262,7 +351,6 @@ def main():
             current_time = time.time()
             if current_time - last_tx_check > 60 or last_stake_time is None:
                 fetched_time = get_last_stake_timestamp(grc, count=100)
-                # If not found in the last 100 txs and no stake cached yet, look deeper (up to 1000)
                 if not fetched_time and last_stake_time is None:
                     fetched_time = get_last_stake_timestamp(grc, count=1000)
                 if fetched_time:
@@ -270,38 +358,74 @@ def main():
                 last_tx_check = current_time
 
             # 4. Update Rich Presence
-            update_payload = {
-                "details": details_str,
-                "state": state_str,
-            }
-            if last_stake_time:
-                update_payload["start"] = int(last_stake_time)
+            if presence_enabled:
+                update_payload = {
+                    "details": details_str,
+                    "state": state_str,
+                }
+                if last_stake_time:
+                    update_payload["start"] = int(last_stake_time)
 
-            buttons = get_presence_buttons()
-            if buttons:
-                update_payload["buttons"] = buttons
+                buttons = get_presence_buttons()
+                if buttons:
+                    update_payload["buttons"] = buttons
 
-            discord.update(**update_payload)
-            logger.info(
-                f"Presence updated: [{details_str}] | [{state_str}] | "
-                f"Last Stake: {last_stake_time}"
-            )
+                discord.update(**update_payload)
+                logger.info(
+                    f"Presence updated: [{details_str}] | [{state_str}] | "
+                    f"Last Stake: {last_stake_time}"
+                )
 
         except ConnectionError as rpc_err:
-            logger.warning(f"Gridcoin wallet unreachable ({rpc_err}). Setting offline status.")
-            offline_payload = {
-                "details": "Wallet Offline",
-                "state": "Reconnecting...",
-            }
-            buttons = get_presence_buttons()
-            if buttons:
-                offline_payload["buttons"] = buttons
-            discord.update(**offline_payload)
+            if presence_enabled:
+                logger.warning(f"Gridcoin wallet unreachable ({rpc_err}). Setting offline status.")
+                offline_payload = {
+                    "details": "Wallet Offline",
+                    "state": "Reconnecting...",
+                }
+                buttons = get_presence_buttons()
+                if buttons:
+                    offline_payload["buttons"] = buttons
+                discord.update(**offline_payload)
         except Exception as err:
-            logger.error(f"Unexpected error in main loop: {err}", exc_info=True)
+            logger.error(f"Unexpected error in polling loop: {err}", exc_info=True)
             time.sleep(5)
 
-        time.sleep(POLL_INTERVAL)
+        # Responsive sleep loop
+        for _ in range(POLL_INTERVAL):
+            if not running or not presence_enabled:
+                break
+            time.sleep(1)
+
+
+def main():
+    global discord_mgr, tray_icon
+
+    if not acquire_single_instance_lock():
+        logger.warning("Another instance of Gridcoin-RPC is already running. Exiting.")
+        sys.exit(0)
+
+    logger.info("Starting Gridcoin Discord Rich Presence daemon...")
+    auto_detect_rpc_credentials()
+    logger.info(f"Target node: {RPC_HOST}:{RPC_PORT}, update interval: {POLL_INTERVAL}s")
+
+    grc = GridcoinRPC(RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS)
+    discord_mgr = DiscordPresenceManager(CLIENT_ID)
+    discord_mgr.connect()
+
+    # Start background polling thread
+    worker_thread = threading.Thread(target=polling_worker, args=(grc, discord_mgr), daemon=True)
+    worker_thread.start()
+
+    # Start system tray icon
+    try:
+        img = create_tray_icon_image()
+        tray_icon = pystray.Icon("gridcoin_rpc", img, "Gridcoin Discord RPC", create_tray_menu())
+        tray_icon.run()
+    except Exception as err:
+        logger.warning(f"System tray unavailable ({err}). Running in background mode.")
+        while running:
+            time.sleep(1)
 
 
 if __name__ == "__main__":
@@ -309,4 +433,6 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logger.info("Daemon stopped by user.")
+        if discord_mgr:
+            discord_mgr.close()
         sys.exit(0)

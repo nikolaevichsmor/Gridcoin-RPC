@@ -130,25 +130,29 @@ GITHUB_BUTTON_LABEL=GitHub
 
 ## Running the Daemon
 
-### Option 1: One-Click Background Scripts (Recommended for Windows)
+### Option 1: Standalone Executable (Windows)
 
-Quick-action batch scripts are located in the repository root:
+Download `Gridcoin-RPC.exe` from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases):
+- Double-click `Gridcoin-RPC.exe` to run.
+- **Single Instance**: Protected by a native Windows mutex—opening it multiple times will not spawn duplicates.
+- **System Tray Icon**: An icon appears in your Windows system tray (near the clock):
+  - **Turn Off / Turn On Presence**: Toggle presence broadcast without quitting.
+  - **Exit**: Cleanly removes presence from Discord and terminates the process.
 
-- **Start**: Double-click `start_background.bat` (or `start_background.vbs` / `main.pyw`).
-  The daemon runs in the background without keeping a command prompt open.
-- **Stop**: Double-click `stop_background.bat`.
-  Terminates any running background daemon instances cleanly.
+### Option 2: One-Click Background Scripts
+
+If running from source on Windows:
+- **Start**: Double-click `start_background.bat` (or `main.pyw`).
+- **Stop**: Double-click `stop_background.bat` or use the system tray icon.
 - **Logs**: Real-time activity and RPC status are logged to `daemon.log`.
 
-### Option 2: Foreground Terminal
+### Option 3: Terminal
 
-Run directly from your command prompt or PowerShell:
-
+Run directly from command prompt or PowerShell:
 ```bash
 python main.py
 ```
-
-To stop, press `Ctrl + C`.
+To stop, press `Ctrl + C` or exit via the system tray.
 
 ---
 
