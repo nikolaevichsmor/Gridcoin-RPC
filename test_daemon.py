@@ -51,21 +51,21 @@ class TestGridcoinDaemon(unittest.TestCase):
     def test_expected_reward(self):
         # 1. With pending BOINC reward
         self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1287.37}), 1297.37)
-        self.assertEqual(format_reward(1297.37), "Est. Reward: 1,297.37 GRC")
+        self.assertEqual(format_reward(1297.37), "Reward: 1,297.37 GRC")
 
         # 2. Investor mode (no pending BOINC reward -> default 10 CBR)
         self.assertEqual(get_expected_reward({"BoincRewardPending": 0.0}), 10.0)
         self.assertEqual(get_expected_reward({}), 10.0)
         self.assertEqual(get_expected_reward(None), 10.0)
-        self.assertEqual(format_reward(10.0), "Est. Reward: 10.00 GRC")
+        self.assertEqual(format_reward(10.0), "Reward: 10.00 GRC")
 
     def test_magnitude_formatting(self):
-        self.assertEqual(format_magnitude(142.5), "Magnitude: 142.5")
-        self.assertEqual(format_magnitude(100), "Magnitude: 100")
-        self.assertEqual(format_magnitude(0), "Magnitude: None")
-        self.assertEqual(format_magnitude(0.0), "Magnitude: None")
-        self.assertEqual(format_magnitude("0"), "Magnitude: None")
-        self.assertEqual(format_magnitude(None), "Magnitude: None")
+        self.assertEqual(format_magnitude(142.5), "Mag: 142.5")
+        self.assertEqual(format_magnitude(100), "Mag: 100")
+        self.assertEqual(format_magnitude(0), "Mag: None")
+        self.assertEqual(format_magnitude(0.0), "Mag: None")
+        self.assertEqual(format_magnitude("0"), "Mag: None")
+        self.assertEqual(format_magnitude(None), "Mag: None")
 
     def test_get_presence_buttons(self):
         with patch("main.GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC"):

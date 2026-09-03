@@ -98,14 +98,14 @@ def get_expected_reward(mining_info: dict) -> float:
 
 def format_reward(reward: float) -> str:
     """Format estimated stake reward string."""
-    return f"Est. Reward: {reward:,.2f} GRC"
+    return f"Reward: {reward:,.2f} GRC"
 
 
 def format_magnitude(raw_mag: Any) -> str:
-    """Format magnitude string. Null, 0, or missing strictly returns 'Magnitude: None'."""
+    """Format magnitude string. Null, 0, or missing strictly returns 'Mag: None'."""
     if raw_mag is None or raw_mag == 0 or raw_mag == "0":
-        return "Magnitude: None"
-    return f"Magnitude: {raw_mag}"
+        return "Mag: None"
+    return f"Mag: {raw_mag}"
 
 
 def get_last_stake_timestamp(grc: GridcoinRPC, count: int = 100) -> Optional[int]:

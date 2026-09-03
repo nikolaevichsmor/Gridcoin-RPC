@@ -16,7 +16,7 @@ A lightweight, resilient Python daemon that displays your live **Gridcoin** stak
 |  Playing a game                                  |
 |  [Gridcoin Icon]  Gridcoin                       |
 |                   Staking: 59,468.15 GRC         |
-|                   Est. Reward: 1,298.02 GRC • Mag: 181 |
+|                   Reward: 1,298.79 GRC • Mag: 181|
 |                   159:04:33 elapsed              |
 |                                                  |
 |                   [ GitHub ]                     |
@@ -25,8 +25,7 @@ A lightweight, resilient Python daemon that displays your live **Gridcoin** stak
 
 - **App Name / Header**: `Gridcoin` (managed via Discord Application ID).
 - **Staking**: Active staking coins with 2 decimal places and thousands separators (e.g. `Staking: 59,468.15 GRC`).
-- **Expected Reward**: Estimated reward on next stake: 10 GRC CBR + pending BOINC researcher reward (e.g. `Est. Reward: 1,297.37 GRC`).
-- **Magnitude**: Research magnitude (e.g. `Magnitude: 181`), strictly displayed as `Magnitude: None` if inactive or 0.
+- **Reward & Magnitude**: Estimated reward on next stake and research magnitude (e.g. `Reward: 1,298.79 GRC • Mag: 181`), compact enough to fit without ellipsis truncation.
 - **Elapsed Timer**: Passes the timestamp of your last stake transaction to Discord's native counter (`159:04:33 elapsed` / `2 days elapsed`).
 - **GitHub Button**: Clickable button linking directly to this repository.
 - **Fail-safe Recovery**: If the Gridcoin node goes offline or restarts, the daemon automatically updates the status to `Wallet Offline` / `Reconnecting...` without crashing, and restores stats as soon as the node is back.
