@@ -2,6 +2,7 @@
 
 A lightweight daemon and portable Windows utility that shows your live Gridcoin staking status, estimated pending reward, and time since last stake directly on your Discord profile.
 
+[![Tests](https://github.com/nikolaevichsmor/Gridcoin-RPC/actions/workflows/tests.yml/badge.svg)](https://github.com/nikolaevichsmor/Gridcoin-RPC/actions/workflows/tests.yml)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Discord Rich Presence](https://img.shields.io/badge/Discord-Rich%20Presence-5865F2.svg)](https://discord.com/)
 [![Gridcoin](https://img.shields.io/badge/Network-Gridcoin-purple.svg)](https://gridcoin.us/)
