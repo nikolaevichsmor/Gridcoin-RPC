@@ -13,9 +13,9 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 ## Preview
 
 - **Staking**: Active staking coin balance with thousands separators.
-- **Est. Reward**: Pending researcher reward matching the value shown in your Gridcoin wallet.
+- **Est. Reward & Difficulty**: Alternates every N update cycles between your estimated researcher reward and network difficulty.
 - **Elapsed Timer**: Live timer counting up from your last confirmed stake transaction.
-- **GitHub Button**: Links directly to this repository.
+- **Rich Presence Buttons**: Direct links to this project on GitHub and the official Gridcoin website ("What is this?").
 - **Auto-Reconnect**: If your wallet is closed or restarted, the status updates to `Wallet Offline` and reconnects as soon as the wallet opens.
 
 ---
@@ -24,7 +24,7 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 
 The easiest way to run the daemon on Windows:
 
-1. Download **`Gridcoin-RPC-v1.0-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.1-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Unzip the archive to any folder.
 3. Make sure your Gridcoin wallet is open.
 4. Launch `Gridcoin-RPC.exe`.
@@ -34,6 +34,8 @@ It automatically reads your RPC credentials from `%APPDATA%\GridcoinResearch\gri
 ### System Tray Controls
 Right-click the Gridcoin icon in your tray to:
 - **Turn Off / On Presence**: Pause or resume Discord broadcasting without closing the app.
+- **Start with Windows**: Toggle automatic startup on Windows boot (safely manages `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
+- **What is Gridcoin? (Website)**: Open gridcoin.us in your browser.
 - **GitHub Repository**: Open this project page in your browser.
 - **Quit**: Clear your Discord status and exit.
 
@@ -86,6 +88,7 @@ Available variables:
 | `RPC_HOST` | Gridcoin node IP | `127.0.0.1` |
 | `RPC_PORT` | Gridcoin RPC port | `15715` |
 | `UPDATE_INTERVAL` | Status refresh interval in seconds | `15` (minimum to respect Discord rate limits) |
+| `SWITCH_CYCLES` | Number of update cycles before alternating between Est. Reward and Difficulty | `2` |
 
 ---
 

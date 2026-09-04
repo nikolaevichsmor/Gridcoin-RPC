@@ -13,10 +13,16 @@ from main import (
     format_details,
     format_magnitude,
     format_reward,
+    format_difficulty,
+    get_difficulty,
+    get_alternating_state,
     get_active_staking_coins,
     get_expected_reward,
     get_last_stake_timestamp,
     get_presence_buttons,
+    get_executable_path,
+    is_autostart_enabled,
+    set_autostart,
     DiscordPresenceManager,
 )
 from rpc_client import GridcoinRPC
@@ -74,16 +80,73 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(format_magnitude("0"), "Mag: None")
         self.assertEqual(format_magnitude(None), "Mag: None")
 
-    def test_get_presence_buttons(self):
-        with patch("main.GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC"):
-            with patch("main.GITHUB_BUTTON_LABEL", "GitHub"):
-                buttons = get_presence_buttons()
-                self.assertEqual(
-                    buttons,
-                    [{"label": "GitHub", "url": "https://github.com/nikolaevichsmor/Gridcoin-RPC"}],
-                )
+    def test_difficulty_extraction(self):
+        # 1. Direct float difficulty
+        self.assertAlmostEqual(get_difficulty({"difficulty": 12.345}), 12.345)
+        # 2. String difficulty
+        self.assertAlmostEqual(get_difficulty({"difficulty": "8.5"}), 8.5)
+        # 3. Dict difficulty with proof-of-stake
+        self.assertAlmostEqual(get_difficulty({"difficulty": {"proof-of-stake": 6.78}}), 6.78)
+        # 4. Dict difficulty with current
+        self.assertAlmostEqual(get_difficulty({"difficulty": {"current": 4.32}}), 4.32)
+        # 5. Dict fallback to values
+        self.assertAlmostEqual(get_difficulty({"difficulty": {"other": 1.23}}), 1.23)
+        # 6. Missing or invalid
+        self.assertEqual(get_difficulty({}), 0.0)
+        self.assertEqual(get_difficulty(None), 0.0)
+        self.assertEqual(get_difficulty({"difficulty": "invalid"}), 0.0)
 
-        with patch("main.GITHUB_REPO_URL", ""):
+    def test_difficulty_formatting(self):
+        self.assertEqual(format_difficulty(12.345), "Difficulty: 12.35")
+        self.assertEqual(format_difficulty(1234.56), "Difficulty: 1,234.56")
+        self.assertEqual(format_difficulty(0.005), "Difficulty: 0.0050")
+        self.assertEqual(format_difficulty(0), "Difficulty: 0.00")
+        self.assertEqual(format_difficulty(-1.0), "Difficulty: 0.00")
+
+    def test_get_alternating_state(self):
+        reward = 25.50
+        diff = 12.34
+        # For switch_cycles = 2:
+        # cycle 0 -> Est. Reward
+        # cycle 1 -> Est. Reward
+        # cycle 2 -> Difficulty
+        # cycle 3 -> Difficulty
+        # cycle 4 -> Est. Reward
+        self.assertEqual(get_alternating_state(0, 2, reward, diff), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(1, 2, reward, diff), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(2, 2, reward, diff), "Difficulty: 12.34")
+        self.assertEqual(get_alternating_state(3, 2, reward, diff), "Difficulty: 12.34")
+        self.assertEqual(get_alternating_state(4, 2, reward, diff), "Est. Reward: 25.50 GRC")
+
+        # For switch_cycles = 1 (every cycle):
+        self.assertEqual(get_alternating_state(0, 1, reward, diff), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(1, 1, reward, diff), "Difficulty: 12.34")
+        self.assertEqual(get_alternating_state(2, 1, reward, diff), "Est. Reward: 25.50 GRC")
+
+    def test_get_presence_buttons(self):
+        with patch("main.GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC"), \
+             patch("main.GITHUB_BUTTON_LABEL", "GitHub"), \
+             patch("main.GRIDCOIN_WEBSITE_URL", "https://gridcoin.us/"), \
+             patch("main.GRIDCOIN_WEBSITE_LABEL", "What is this?"):
+            buttons = get_presence_buttons()
+            self.assertEqual(
+                buttons,
+                [
+                    {"label": "GitHub", "url": "https://github.com/nikolaevichsmor/Gridcoin-RPC"},
+                    {"label": "What is this?", "url": "https://gridcoin.us/"},
+                ],
+            )
+
+        with patch("main.GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC"), \
+             patch("main.GRIDCOIN_WEBSITE_URL", ""):
+            buttons = get_presence_buttons()
+            self.assertEqual(
+                buttons,
+                [{"label": "GitHub", "url": "https://github.com/nikolaevichsmor/Gridcoin-RPC"}],
+            )
+
+        with patch("main.GITHUB_REPO_URL", ""), \
+             patch("main.GRIDCOIN_WEBSITE_URL", ""):
             buttons = get_presence_buttons()
             self.assertIsNone(buttons)
 
@@ -213,6 +276,51 @@ class TestGridcoinDaemon(unittest.TestCase):
             success_fail = mgr.update(details="Staking: 100.00 GRC")
             self.assertFalse(success_fail)
             self.assertFalse(mgr.connected)
+
+    def test_get_executable_path_frozen(self):
+        with patch.object(sys, "frozen", True, create=True):
+            with patch.object(sys, "executable", r"C:\app\Gridcoin-RPC.exe"):
+                path = get_executable_path()
+                self.assertIn("Gridcoin-RPC.exe", path)
+                self.assertTrue(path.startswith('"') and path.endswith('"'))
+
+    def test_is_autostart_enabled(self):
+        with patch("sys.platform", "win32"):
+            mock_winreg = MagicMock()
+            mock_key = MagicMock()
+            mock_winreg.OpenKey.return_value.__enter__.return_value = mock_key
+            mock_winreg.QueryValueEx.return_value = (r'"C:\app\Gridcoin-RPC.exe"', 1)
+            mock_winreg.KEY_READ = 1
+
+            with patch.dict("sys.modules", {"winreg": mock_winreg}):
+                self.assertTrue(is_autostart_enabled())
+                mock_winreg.QueryValueEx.assert_called_once_with(mock_key, "Gridcoin-RPC")
+
+            mock_winreg.QueryValueEx.side_effect = FileNotFoundError()
+            with patch.dict("sys.modules", {"winreg": mock_winreg}):
+                self.assertFalse(is_autostart_enabled())
+
+    def test_set_autostart(self):
+        with patch("sys.platform", "win32"):
+            mock_winreg = MagicMock()
+            mock_key = MagicMock()
+            mock_winreg.CreateKeyEx.return_value.__enter__.return_value = mock_key
+            mock_winreg.KEY_SET_VALUE = 2
+            mock_winreg.REG_SZ = 1
+
+            with patch.dict("sys.modules", {"winreg": mock_winreg}):
+                with patch("main.get_executable_path", return_value=r'"C:\app\Gridcoin-RPC.exe"'):
+                    # Enable autostart
+                    res = set_autostart(True)
+                    self.assertTrue(res)
+                    mock_winreg.SetValueEx.assert_called_once_with(
+                        mock_key, "Gridcoin-RPC", 0, 1, r'"C:\app\Gridcoin-RPC.exe"'
+                    )
+
+                    # Disable autostart
+                    res = set_autostart(False)
+                    self.assertTrue(res)
+                    mock_winreg.DeleteValue.assert_called_once_with(mock_key, "Gridcoin-RPC")
 
 
 if __name__ == "__main__":
