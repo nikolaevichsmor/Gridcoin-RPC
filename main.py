@@ -300,17 +300,52 @@ def format_difficulty(diff: float) -> str:
     return f"Difficulty: {diff:,.2f}"
 
 
+def get_top_project_rac(explain_magnitude_data: Any) -> Optional[str]:
+    """Extract top BOINC project and formatted RAC from explainmagnitude RPC response."""
+    if not isinstance(explain_magnitude_data, list):
+        return None
+    valid_projects = []
+    for item in explain_magnitude_data:
+        if not isinstance(item, dict):
+            continue
+        proj = item.get("project", "")
+        if not proj or proj.lower() == "total":
+            continue
+        try:
+            rac = float(item.get("rac", 0))
+            if rac > 0:
+                valid_projects.append((proj, rac))
+        except (ValueError, TypeError):
+            continue
+    if not valid_projects:
+        return None
+    top_proj, top_rac = max(valid_projects, key=lambda x: x[1])
+    return f"{top_proj} RAC: {round(top_rac):,}"
+
+
 def get_alternating_state(
     cycle: int,
     switch_cycles: int,
     reward: float,
     difficulty: float,
+    project_rac: Optional[str] = None,
 ) -> str:
-    """Alternate between Est. Reward and Difficulty every switch_cycles update cycles."""
+    """Alternate between Est. Reward, Difficulty, and Project RAC every switch_cycles update cycles."""
     effective_switch = max(int(switch_cycles), 1)
-    if (cycle // effective_switch) % 2 == 0:
-        return format_reward(reward)
-    return format_difficulty(difficulty)
+    step = cycle // effective_switch
+
+    if project_rac:
+        mode = step % 3
+        if mode == 0:
+            return format_reward(reward)
+        elif mode == 1:
+            return format_difficulty(difficulty)
+        else:
+            return project_rac
+    else:
+        if step % 2 == 0:
+            return format_reward(reward)
+        return format_difficulty(difficulty)
 
 
 def format_magnitude(raw_mag: Any) -> str:
@@ -419,6 +454,8 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     global running, presence_enabled
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
+    last_rac_check = 0.0
+    top_project_rac: Optional[str] = None
     initial_scan_done = False
     cycle_count = 0
 
@@ -435,12 +472,23 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
             difficulty = get_difficulty(mining_info)
             details_str = format_details(active_coins)
 
-            # 2. Alternating State (Est. Reward <-> Difficulty every N cycles)
+            # Check for top BOINC project RAC periodically
+            current_time = time.time()
+            if current_time - last_rac_check > 60 or top_project_rac is None:
+                try:
+                    explain_data = grc.call("explainmagnitude")
+                    top_project_rac = get_top_project_rac(explain_data)
+                except Exception as err:
+                    logger.debug(f"Failed to fetch explainmagnitude: {err}")
+                last_rac_check = current_time
+
+            # 2. Alternating State (Est. Reward <-> Difficulty <-> Top Project RAC every N cycles)
             state_str = get_alternating_state(
                 cycle_count,
                 SWITCH_CYCLES,
                 expected_reward,
                 difficulty,
+                top_project_rac,
             )
             cycle_count += 1
 

@@ -15,6 +15,7 @@ from main import (
     format_reward,
     format_difficulty,
     get_difficulty,
+    get_top_project_rac,
     get_alternating_state,
     get_active_staking_coins,
     get_expected_reward,
@@ -122,6 +123,55 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(get_alternating_state(0, 1, reward, diff), "Est. Reward: 25.50 GRC")
         self.assertEqual(get_alternating_state(1, 1, reward, diff), "Difficulty: 12.34")
         self.assertEqual(get_alternating_state(2, 1, reward, diff), "Est. Reward: 25.50 GRC")
+
+    def test_get_top_project_rac(self):
+        # 1. Multiple projects with total row
+        data = [
+            {"project": "SRBase", "rac": 0.091792, "magnitude": 0},
+            {"project": "asteroids@home", "rac": 1.719628, "magnitude": 0.01},
+            {"project": "odlk1", "rac": 38426.01582, "magnitude": 183.7},
+            {"project": "total", "rac": 38428.112389, "magnitude": 183.71},
+        ]
+        self.assertEqual(get_top_project_rac(data), "odlk1 RAC: 38,426")
+
+        # 2. String rac values
+        data_str = [{"project": "worldcommunitygrid", "rac": "12500.4"}]
+        self.assertEqual(get_top_project_rac(data_str), "worldcommunitygrid RAC: 12,500")
+
+        # 3. Only total row or all 0 -> returns None
+        self.assertIsNone(get_top_project_rac([{"project": "total", "rac": 5000}]))
+        self.assertIsNone(get_top_project_rac([{"project": "test", "rac": 0}]))
+        self.assertIsNone(get_top_project_rac([]))
+        self.assertIsNone(get_top_project_rac(None))
+        self.assertIsNone(get_top_project_rac("invalid"))
+
+    def test_get_alternating_state_with_project_rac(self):
+        reward = 25.50
+        diff = 12.34
+        rac_str = "odlk1 RAC: 38,426"
+
+        # 3-way rotation for switch_cycles = 1:
+        # cycle 0 -> Reward
+        # cycle 1 -> Difficulty
+        # cycle 2 -> Project RAC
+        # cycle 3 -> Reward
+        self.assertEqual(get_alternating_state(0, 1, reward, diff, rac_str), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(1, 1, reward, diff, rac_str), "Difficulty: 12.34")
+        self.assertEqual(get_alternating_state(2, 1, reward, diff, rac_str), "odlk1 RAC: 38,426")
+        self.assertEqual(get_alternating_state(3, 1, reward, diff, rac_str), "Est. Reward: 25.50 GRC")
+
+        # 3-way rotation for switch_cycles = 2:
+        self.assertEqual(get_alternating_state(0, 2, reward, diff, rac_str), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(1, 2, reward, diff, rac_str), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(2, 2, reward, diff, rac_str), "Difficulty: 12.34")
+        self.assertEqual(get_alternating_state(3, 2, reward, diff, rac_str), "Difficulty: 12.34")
+        self.assertEqual(get_alternating_state(4, 2, reward, diff, rac_str), "odlk1 RAC: 38,426")
+        self.assertEqual(get_alternating_state(5, 2, reward, diff, rac_str), "odlk1 RAC: 38,426")
+        self.assertEqual(get_alternating_state(6, 2, reward, diff, rac_str), "Est. Reward: 25.50 GRC")
+
+        # When project_rac is None, fallback to 2-way:
+        self.assertEqual(get_alternating_state(0, 2, reward, diff, None), "Est. Reward: 25.50 GRC")
+        self.assertEqual(get_alternating_state(2, 2, reward, diff, None), "Difficulty: 12.34")
 
     def test_get_presence_buttons(self):
         with patch("main.GITHUB_REPO_URL", "https://github.com/nikolaevichsmor/Gridcoin-RPC"), \

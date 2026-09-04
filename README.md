@@ -18,7 +18,7 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 |  [Gridcoin Icon]  Gridcoin                       |
 |                   Staking: 59,468.15 GRC         |
 |                   Est. Reward: 1,304.02 GRC      |
-|                   (cycles with Difficulty)       |
+|                   (cycles: Reward / Diff / RAC)  |
 |                   161:51:54 elapsed              |
 |                                                  |
 |         [ GitHub ]       [ What is this? ]       |
@@ -26,7 +26,7 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 ```
 
 - **Staking**: Active staking coin balance with thousands separators.
-- **Est. Reward & Difficulty**: Automatically alternates every N update cycles between pending researcher reward (`Est. Reward: 1,304.02 GRC`) and network difficulty (`Difficulty: 12.34`).
+- **Dynamic 3-Way State**: Automatically alternates every N update cycles between pending reward (`Est. Reward: 1,304.02 GRC`), network difficulty (`Difficulty: 12.34`), and your top BOINC project RAC (`odlk1 RAC: 38,426`). If no active project RAC exists, seamlessly alternates between reward and difficulty.
 - **Elapsed Timer**: Live timer counting up from your last confirmed stake transaction.
 - **Dual Buttons**: Direct profile links to project source on GitHub and the official Gridcoin website ("What is this?").
 - **Auto-Reconnect**: If your wallet is closed or restarted, the status updates to `Wallet Offline` and reconnects as soon as the wallet opens.
