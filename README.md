@@ -1,6 +1,6 @@
 # Gridcoin Discord Rich Presence
 
-A lightweight daemon and portable Windows utility that shows your live Gridcoin staking status, estimated pending reward, and time since last stake directly on your Discord profile.
+A lightweight daemon and portable Windows utility that shows your live Gridcoin staking status, estimated pending reward, network difficulty, and time since last stake directly on your Discord profile.
 
 [![Tests](https://github.com/nikolaevichsmor/Gridcoin-RPC/actions/workflows/tests.yml/badge.svg)](https://github.com/nikolaevichsmor/Gridcoin-RPC/actions/workflows/tests.yml)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -12,10 +12,23 @@ A lightweight daemon and portable Windows utility that shows your live Gridcoin 
 
 ## Preview
 
+```text
++--------------------------------------------------+
+|  Playing a game                                  |
+|  [Gridcoin Icon]  Gridcoin                       |
+|                   Staking: 59,468.15 GRC         |
+|                   Est. Reward: 1,304.02 GRC      |
+|                   (cycles with Difficulty)       |
+|                   161:51:54 elapsed              |
+|                                                  |
+|         [ GitHub ]       [ What is this? ]       |
++--------------------------------------------------+
+```
+
 - **Staking**: Active staking coin balance with thousands separators.
-- **Est. Reward & Difficulty**: Alternates every N update cycles between your estimated researcher reward and network difficulty.
+- **Est. Reward & Difficulty**: Automatically alternates every N update cycles between pending researcher reward (`Est. Reward: 1,304.02 GRC`) and network difficulty (`Difficulty: 12.34`).
 - **Elapsed Timer**: Live timer counting up from your last confirmed stake transaction.
-- **Rich Presence Buttons**: Direct links to this project on GitHub and the official Gridcoin website ("What is this?").
+- **Dual Buttons**: Direct profile links to project source on GitHub and the official Gridcoin website ("What is this?").
 - **Auto-Reconnect**: If your wallet is closed or restarted, the status updates to `Wallet Offline` and reconnects as soon as the wallet opens.
 
 ---
@@ -97,7 +110,7 @@ Available variables:
 Run the included test suite:
 
 ```bash
-python -m unittest test_daemon.py
+python -m unittest discover tests
 ```
 
 ---
