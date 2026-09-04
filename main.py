@@ -419,6 +419,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     global running, presence_enabled
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
+    initial_scan_done = False
     cycle_count = 0
 
     while running:
@@ -443,13 +444,19 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
             )
             cycle_count += 1
 
-            # 3. Check for last stake timestamp every 60 seconds
+            # 3. Check for stake timestamp: 100/500 initial scan, then lightweight 10-tx checks
             current_time = time.time()
-            if current_time - last_tx_check > 60 or last_stake_time is None:
+            if not initial_scan_done:
                 fetched_time = get_last_stake_timestamp(grc, count=100)
-                if not fetched_time and last_stake_time is None:
-                    fetched_time = get_last_stake_timestamp(grc, count=1000)
+                if not fetched_time:
+                    fetched_time = get_last_stake_timestamp(grc, count=500)
                 if fetched_time:
+                    last_stake_time = fetched_time
+                initial_scan_done = True
+                last_tx_check = current_time
+            elif current_time - last_tx_check > 60:
+                fetched_time = get_last_stake_timestamp(grc, count=10)
+                if fetched_time and (last_stake_time is None or fetched_time > last_stake_time):
                     last_stake_time = fetched_time
                 last_tx_check = current_time
 
