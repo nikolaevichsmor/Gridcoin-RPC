@@ -13,16 +13,16 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 ## Preview
 
 ```text
-+--------------------------------------------------+
-|  Playing a game                                  |
-|  [Gridcoin Icon]  Gridcoin                       |
-|                   Staking: 59,468.15 GRC         |
-|                   Est. Reward: 1,304.02 GRC      |
-|                   (cycles: Reward / Diff / RAC / Mag / Block / Share) |
-|                   161:51:54 elapsed              |
-|                                                  |
-|         [ GitHub ]       [ What is this? ]       |
-+--------------------------------------------------+
++-------------------------------------------------------------+
+|  Playing a game                                             |
+|  [Gridcoin Icon]  Gridcoin                                  |
+|                   Staking: 59,468.15 GRC                    |
+|                   Est. Reward: 1,304.02 GRC                 |
+|                   (cycles: Reward / Difficulty / RAC / ...) |
+|                   161:51:54 elapsed                         |
+|                                                             |
+|            [ GitHub ]             [ What is this? ]         |
++-------------------------------------------------------------+
 ```
 
 - **Smart Staking Status (Line 1)**: Displays your active staking coin balance with thousands separators (e.g. `Staking: 59,468.15 GRC`). If your wallet is locked or staking is disabled, automatically reflects this with `Not Staking: 59,468.15 GRC` or `Staking: Inactive`.
