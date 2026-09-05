@@ -12,13 +12,12 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 
 ## Preview
 
-```text
+```
 +-------------------------------------------------------------+
 |  Playing a game                                             |
 |  [Gridcoin Icon]  Gridcoin                                  |
 |                   Staking: 59,468.15 GRC                    |
 |                   Est. Reward: 1,304.02 GRC                 |
-|                   (cycles: Reward / Difficulty / RAC / ...) |
 |                   161:51:54 elapsed                         |
 |                                                             |
 |            [ GitHub ]             [ What is this? ]         |
