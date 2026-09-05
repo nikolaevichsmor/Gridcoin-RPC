@@ -24,7 +24,7 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 +-------------------------------------------------------------+
 ```
 
-- **Smart Staking Status (Line 1)**: Displays your active staking coin balance with thousands separators (e.g. `Staking: 59,468.15 GRC`). If your wallet is locked or staking is disabled, automatically reflects this with `Not Staking: 59,468.15 GRC` or `Staking: Inactive`.
+- **Smart Staking Status (Line 1)**: Displays your active staking status. By default, **Privacy Mode (`Hide Balance`)** is enabled, displaying `Staking ********* GRC` (or `Not Staking ********* GRC` / `Staking: Inactive` if locked) without revealing your coin holdings. When Privacy Mode is unticked in the tray, it displays your exact active staking coin balance with thousands separators (e.g. `Staking: 59,468.15 GRC`).
 - **Configurable Rotating Stats (Line 2)**:
   - **First-Run Default**: On first launch, **only 1 checkbox is enabled by default** — **Estimated Reward**.
   - Users can enable any combination of the 6 available metrics via the system tray submenu:
@@ -58,6 +58,7 @@ It automatically reads your RPC credentials from `%APPDATA%\GridcoinResearch\gri
 ### System Tray Controls
 Right-click the Gridcoin icon in your tray to:
 - **Turn Off / On Presence**: Pause or resume Discord broadcasting without closing the app.
+- **Hide Balance**: Toggle Privacy Mode to hide your staking coin amount (enabled by default on first launch; displays `Staking ********* GRC` instead of exact coin balance).
 - **Cycle Stats (Line 2)**: Hover to open the stats submenu and toggle checkmarks (✓) for:
   - [x] **Estimated Reward** *(Enabled by default on first launch)*
   - [ ] **Difficulty**

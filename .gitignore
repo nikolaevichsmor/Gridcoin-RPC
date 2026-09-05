@@ -18,6 +18,7 @@ daemon.log
 # PyInstaller build outputs
 build/
 dist/
+dist_build/
 *.spec
 
 # User settings

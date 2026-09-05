@@ -74,6 +74,7 @@ DISCORD_SMALL_IMAGE_OFFLINE = os.getenv("DISCORD_SMALL_IMAGE_OFFLINE", "offline"
 
 DEFAULT_SETTINGS = {
     "presence_enabled": True,
+    "hide_balance": True,
     "cycle_show_reward": True,
     "cycle_show_difficulty": False,
     "cycle_show_rac": False,
@@ -113,6 +114,7 @@ def save_settings() -> bool:
     """Persist current user settings to settings.json."""
     data = {
         "presence_enabled": presence_enabled,
+        "hide_balance": hide_balance,
         "cycle_show_reward": cycle_show_reward,
         "cycle_show_difficulty": cycle_show_difficulty,
         "cycle_show_rac": cycle_show_rac,
@@ -134,6 +136,7 @@ _initial_settings = load_settings()
 _lock_socket = None
 running = True
 presence_enabled = _initial_settings["presence_enabled"]
+hide_balance: bool = _initial_settings["hide_balance"]
 discord_mgr: Optional["DiscordPresenceManager"] = None
 AUTOSTART_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_APP_NAME = "Gridcoin-RPC"
@@ -330,8 +333,19 @@ def is_wallet_staking(mining_or_staking_info: Any) -> Optional[bool]:
     return None
 
 
-def format_details(active_coins: float, is_staking: Optional[bool] = None) -> str:
+def format_details(
+    active_coins: float,
+    is_staking: Optional[bool] = None,
+    hide_balance: bool = False,
+) -> str:
     """Format details string according to staking coin count and active staking status."""
+    if hide_balance:
+        if is_staking is False:
+            if active_coins > 0:
+                return "Not Staking ********* GRC"
+            return "Staking: Inactive"
+        return "Staking ********* GRC"
+
     if is_staking is False:
         if active_coins > 0:
             return f"Not Staking: {active_coins:,.2f} GRC"
@@ -745,7 +759,15 @@ def update_tray_menu_checks(systray) -> None:
         except Exception:
             pass
 
-    # 2. Cycle Stats (Line 2) subitems
+    # 2. Hide Balance
+    if "Hide Balance" in id_map:
+        flag = 0x00000008 if hide_balance else 0x00000000
+        try:
+            u32.CheckMenuItem(menu, id_map["Hide Balance"], flag)
+        except Exception:
+            pass
+
+    # 3. Cycle Stats (Line 2) subitems
     stat_flags = {
         "Estimated Reward": cycle_show_reward,
         "Difficulty": cycle_show_difficulty,
@@ -925,7 +947,7 @@ class DiscordPresenceManager:
 
 def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     """Background thread worker that polls Gridcoin RPC and updates Discord."""
-    global running, presence_enabled
+    global running, presence_enabled, hide_balance
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
 
@@ -971,7 +993,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
 
             pool_share_str = format_pool_share(active_coins, net_weight)
 
-            details_str = format_details(active_coins, is_staking=is_staking)
+            details_str = format_details(active_coins, is_staking=is_staking, hide_balance=hide_balance)
 
             # Check for top BOINC project RAC and total magnitude periodically
             current_time = time.time()
@@ -1120,6 +1142,14 @@ def main():
             discord_mgr.clear()
         trigger_presence_update()
 
+    def on_tray_toggle_hide_balance(systray):
+        global hide_balance
+        hide_balance = not hide_balance
+        save_settings()
+        logger.info(f"Toggled Hide Balance: {hide_balance}")
+        trigger_presence_update()
+        update_tray_menu_checks(systray)
+
     def on_toggle_reward(systray):
         if toggle_stat("reward"):
             trigger_presence_update()
@@ -1185,6 +1215,7 @@ def main():
             )
             menu_options = (
                 ("Turn Off / On Presence", None, on_tray_toggle),
+                ("Hide Balance", None, on_tray_toggle_hide_balance),
                 ("Cycle Stats (Line 2)", None, cycle_suboptions),
                 ("Start with Windows", None, on_tray_autostart),
                 ("What is Gridcoin? (Website)", None, on_tray_website),

@@ -721,6 +721,7 @@ class TestGridcoinDaemon(unittest.TestCase):
     def test_get_menu_id_map_and_checks(self):
         sample_options = [
             ("Turn Off / On Presence", None, lambda s: None, 1023),
+            ("Hide Balance", None, lambda s: None, 1032),
             (
                 "Cycle Stats (Line 2)",
                 None,
@@ -738,6 +739,7 @@ class TestGridcoinDaemon(unittest.TestCase):
         ]
 
         id_map = _get_menu_id_map(sample_options)
+        self.assertEqual(id_map.get("Hide Balance"), 1032)
         self.assertEqual(id_map.get("Estimated Reward"), 1024)
         self.assertEqual(id_map.get("Difficulty"), 1025)
         self.assertEqual(id_map.get("Top Project RAC"), 1026)
@@ -758,8 +760,8 @@ class TestGridcoinDaemon(unittest.TestCase):
              patch("main.is_autostart_enabled", return_value=True), \
              patch.object(ctypes, "windll", mock_windll, create=True):
             update_tray_menu_checks(mock_systray)
-            # Should have called CheckMenuItem for Start with Windows and all 6 stats
-            self.assertEqual(mock_u32.CheckMenuItem.call_count, 7)
+            # Should have called CheckMenuItem for Start with Windows, Hide Balance and all 6 stats
+            self.assertEqual(mock_u32.CheckMenuItem.call_count, 8)
 
         # Test update_tray_menu_checks on non-Windows (should return immediately)
         with patch("sys.platform", "linux"):
@@ -776,6 +778,13 @@ class TestGridcoinDaemon(unittest.TestCase):
 
         # 3. None (status unavailable -> backward compatible fallback)
         self.assertEqual(format_details(12450.50, is_staking=None), "Staking: 12,450.50 GRC")
+
+        # 4. Hide balance enabled (privacy mode)
+        self.assertEqual(format_details(12450.50, is_staking=True, hide_balance=True), "Staking ********* GRC")
+        self.assertEqual(format_details(0.0, is_staking=True, hide_balance=True), "Staking ********* GRC")
+        self.assertEqual(format_details(12450.50, is_staking=False, hide_balance=True), "Not Staking ********* GRC")
+        self.assertEqual(format_details(0.0, is_staking=False, hide_balance=True), "Staking: Inactive")
+        self.assertEqual(format_details(12450.50, is_staking=None, hide_balance=True), "Staking ********* GRC")
 
     def test_is_wallet_staking(self):
         # Boolean values
@@ -828,6 +837,7 @@ class TestGridcoinDaemon(unittest.TestCase):
             with patch("main.SETTINGS_FILE", tmp_settings):
                 # Save settings
                 with patch("main.presence_enabled", False), \
+                     patch("main.hide_balance", False), \
                      patch("main.cycle_show_reward", False), \
                      patch("main.cycle_show_difficulty", True), \
                      patch("main.cycle_show_rac", True):
@@ -838,15 +848,17 @@ class TestGridcoinDaemon(unittest.TestCase):
                 # Load settings
                 loaded = load_settings()
                 self.assertFalse(loaded["presence_enabled"])
+                self.assertFalse(loaded["hide_balance"])
                 self.assertFalse(loaded["cycle_show_reward"])
                 self.assertTrue(loaded["cycle_show_difficulty"])
                 self.assertTrue(loaded["cycle_show_rac"])
 
-                # First-run when settings.json does not exist (only Estimated Reward enabled)
+                # First-run when settings.json does not exist (Estimated Reward and hide_balance enabled)
                 if tmp_settings.is_file():
                     tmp_settings.unlink()
                 first_run = load_settings()
                 self.assertTrue(first_run["presence_enabled"])
+                self.assertTrue(first_run["hide_balance"])
                 self.assertTrue(first_run["cycle_show_reward"])
                 self.assertFalse(first_run["cycle_show_difficulty"])
                 self.assertFalse(first_run["cycle_show_rac"])
@@ -859,6 +871,7 @@ class TestGridcoinDaemon(unittest.TestCase):
                     f.write("invalid json")
                 defaults = load_settings()
                 self.assertTrue(defaults["presence_enabled"])
+                self.assertTrue(defaults["hide_balance"])
                 self.assertTrue(defaults["cycle_show_reward"])
                 self.assertFalse(defaults["cycle_show_difficulty"])
                 self.assertFalse(defaults["cycle_show_rac"])
