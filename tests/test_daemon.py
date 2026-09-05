@@ -273,6 +273,41 @@ class TestGridcoinDaemon(unittest.TestCase):
         finally:
             temp_path.unlink(missing_ok=True)
 
+    def test_polling_worker_initial_scan_queries_500_once(self):
+        # On a wallet with no stake, the first iteration must issue exactly
+        # two listtransactions calls (100, then 500); the 500 scan must not
+        # be repeated by a second fallback in the worker.
+        import main
+
+        def rpc_call(method, params=None):
+            if method == "getmininginfo":
+                return {}
+            if method == "explainmagnitude":
+                return []
+            if method == "listtransactions":
+                return []
+            raise AssertionError(f"unexpected RPC {method}")
+
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.side_effect = rpc_call
+
+        mock_discord = MagicMock(spec=DiscordPresenceManager)
+
+        def stop_after_update(**kwargs):
+            main.running = False
+            return True
+
+        mock_discord.update.side_effect = stop_after_update
+
+        with patch("main.running", True), patch("main.presence_enabled", True):
+            main.polling_worker(mock_grc, mock_discord)
+
+        lt_params = [
+            c.args[1] for c in mock_grc.call.call_args_list if c.args[0] == "listtransactions"
+        ]
+        self.assertEqual(lt_params, [["*", 100], ["*", 500]])
+        mock_discord.update.assert_called_once()
+
     def test_get_last_stake_timestamp_error(self):
         mock_grc = MagicMock(spec=GridcoinRPC)
         mock_grc.call.side_effect = ConnectionError("Node unreachable")

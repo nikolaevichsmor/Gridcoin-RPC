@@ -495,9 +495,8 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
             # 3. Check for stake timestamp: 100/500 initial scan, then lightweight 10-tx checks
             current_time = time.time()
             if not initial_scan_done:
+                # get_last_stake_timestamp already widens 100 -> 500 itself.
                 fetched_time = get_last_stake_timestamp(grc, count=100)
-                if not fetched_time:
-                    fetched_time = get_last_stake_timestamp(grc, count=500)
                 if fetched_time:
                     last_stake_time = fetched_time
                 initial_scan_done = True
