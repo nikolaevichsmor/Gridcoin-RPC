@@ -13,8 +13,12 @@ from pypresence.exceptions import DiscordError, DiscordNotFound, PipeClosed
 
 import ctypes
 import webbrowser
-from infi.systray import SysTrayIcon
 from rpc_client import GridcoinRPC
+
+# infi.systray dereferences ctypes.windll at import time, so it can only be
+# imported on Windows. The tray is Windows-only anyway (see main()).
+if sys.platform == "win32":
+    from infi.systray import SysTrayIcon
 
 # Set base directory to the script's location
 BASE_DIR = Path(__file__).resolve().parent
