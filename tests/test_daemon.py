@@ -63,9 +63,12 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(format_details(-10.0), "Staking: 0.00 GRC")
 
     def test_expected_reward(self):
-        # 1. With pending BOINC reward (matches wallet GUI)
-        self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1289.53}), 1289.53)
-        self.assertEqual(format_reward(1289.53), "Est. Reward: 1,289.53 GRC")
+        # 1. Researcher: constant block reward plus pending research accrual
+        self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1289.53}), 1299.53)
+        self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": "1289.53"}), 1299.53)
+        self.assertEqual(format_reward(1299.53), "Est. Reward: 1,299.53 GRC")
+        # Invalid accrual falls back to the CBR alone
+        self.assertEqual(get_expected_reward({"BoincRewardPending": "n/a"}), 10.0)
 
         # 2. Investor mode (no pending BOINC reward -> default 10 CBR)
         self.assertEqual(get_expected_reward({"BoincRewardPending": 0.0}), 10.0)

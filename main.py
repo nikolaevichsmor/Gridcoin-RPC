@@ -238,19 +238,32 @@ def format_details(active_coins: float) -> str:
     return f"Staking: {active_coins:,.2f} GRC"
 
 
+# Gridcoin's constant block reward (GRC). Every stake pays this; researchers
+# additionally receive their pending research accrual. The value is not
+# exposed by getmininginfo, so it is a constant here (default in
+# GetConstantBlockReward, Gridcoin-Research src/gridcoin/staking/reward.cpp).
+CONSTANT_BLOCK_REWARD = 10.0
+
+
 def get_expected_reward(mining_info: dict) -> float:
-    """Extract expected research reward from BoincRewardPending (matches wallet GUI)."""
+    """Expected stake reward: constant block reward plus pending research accrual.
+
+    BoincRewardPending from getmininginfo is the research accrual only, so it
+    is added to the CBR rather than replacing it. Investors (no accrual) get
+    exactly the CBR.
+    """
+    reward = CONSTANT_BLOCK_REWARD
     if not isinstance(mining_info, dict):
-        return 10.0
+        return reward
     pending = mining_info.get("BoincRewardPending")
     if pending is not None:
         try:
             val = float(pending)
             if val > 0:
-                return val
+                reward += val
         except (ValueError, TypeError):
             pass
-    return 10.0
+    return reward
 
 
 def format_reward(reward: float) -> str:
