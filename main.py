@@ -385,6 +385,72 @@ def get_last_stake_timestamp(grc: GridcoinRPC, count: int = 100) -> Optional[int
     return None
 
 
+def _is_stake_tx(tx: Any) -> bool:
+    return (
+        isinstance(tx, dict)
+        and tx.get("category") in ("generate", "immature", "stake")
+        and tx.get("confirmations", 0) >= 0
+    )
+
+
+def get_newest_txid(grc: GridcoinRPC) -> Optional[str]:
+    """Return the txid of the newest listtransactions entry, used as a scan marker."""
+    try:
+        txs = grc.call("listtransactions", ["*", 1])
+        if isinstance(txs, list) and txs and isinstance(txs[-1], dict):
+            txid = txs[-1].get("txid")
+            return str(txid) if txid else None
+    except Exception as err:
+        logger.warning(f"Failed to fetch newest transaction: {err}")
+    return None
+
+
+def scan_new_stakes(
+    grc: GridcoinRPC,
+    marker_txid: Optional[str],
+    page_size: int = 50,
+    max_entries: int = 10000,
+) -> "tuple[Optional[int], Optional[str]]":
+    """Page back through listtransactions (newest first) until marker_txid is seen.
+
+    Returns (timestamp of the newest stake among the entries newer than the
+    marker, or None; txid of the newest entry seen, or None). Cost is one page
+    when nothing new has happened, and proportional to the number of new
+    entries otherwise, so no window of entries is ever skipped.
+    """
+    best_ts: Optional[int] = None
+    new_marker: Optional[str] = None
+    skip = 0
+    while skip < max_entries:
+        try:
+            txs = grc.call("listtransactions", ["*", page_size, skip])
+        except Exception as err:
+            logger.warning(f"Failed to scan for new stakes: {err}")
+            break
+        if not isinstance(txs, list) or not txs:
+            break
+        for tx in reversed(txs):  # listtransactions is oldest-first; walk newest-first
+            if not isinstance(tx, dict):
+                continue
+            txid = tx.get("txid")
+            if new_marker is None and txid:
+                new_marker = str(txid)
+            if marker_txid is not None and txid == marker_txid:
+                return best_ts, new_marker
+            if _is_stake_tx(tx):
+                ts = tx.get("blocktime") or tx.get("time")
+                if ts is not None and (best_ts is None or int(ts) > best_ts):
+                    best_ts = int(ts)
+        if len(txs) < page_size:
+            break
+        skip += page_size
+    else:
+        logger.warning(
+            f"Stake scan hit the {max_entries}-entry cap without finding marker {marker_txid}"
+        )
+    return best_ts, new_marker
+
+
 class DiscordPresenceManager:
     """Manages connection and presence updates to Discord IPC with auto-reconnect."""
 
@@ -455,6 +521,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
     last_rac_check = 0.0
+    stake_marker: Optional[str] = None
     top_project_rac: Optional[str] = None
     initial_scan_done = False
     cycle_count = 0
@@ -492,20 +559,23 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
             )
             cycle_count += 1
 
-            # 3. Check for stake timestamp: 100/500 initial scan, then lightweight 10-tx checks
+            # 3. Check for stake timestamp: 100/500 initial scan, then every 60 s
+            #    read only the entries newer than the last seen txid.
             current_time = time.time()
             if not initial_scan_done:
+                # get_last_stake_timestamp already widens 100 -> 500 itself.
                 fetched_time = get_last_stake_timestamp(grc, count=100)
-                if not fetched_time:
-                    fetched_time = get_last_stake_timestamp(grc, count=500)
                 if fetched_time:
                     last_stake_time = fetched_time
+                stake_marker = get_newest_txid(grc)
                 initial_scan_done = True
                 last_tx_check = current_time
             elif current_time - last_tx_check > 60:
-                fetched_time = get_last_stake_timestamp(grc, count=10)
+                fetched_time, new_marker = scan_new_stakes(grc, stake_marker)
                 if fetched_time and (last_stake_time is None or fetched_time > last_stake_time):
                     last_stake_time = fetched_time
+                if new_marker:
+                    stake_marker = new_marker
                 last_tx_check = current_time
 
             # 4. Update Rich Presence
