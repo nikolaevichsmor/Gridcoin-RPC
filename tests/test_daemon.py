@@ -1,3 +1,5 @@
+"""Unit test suite for Gridcoin Discord RPC daemon."""
+
 from pathlib import Path
 import sys
 import unittest
