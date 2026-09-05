@@ -20,6 +20,8 @@ from main import (
     get_active_staking_coins,
     get_expected_reward,
     get_last_stake_timestamp,
+    get_newest_txid,
+    scan_new_stakes,
     get_presence_buttons,
     get_executable_path,
     is_autostart_enabled,
@@ -274,9 +276,9 @@ class TestGridcoinDaemon(unittest.TestCase):
             temp_path.unlink(missing_ok=True)
 
     def test_polling_worker_initial_scan_queries_500_once(self):
-        # On a wallet with no stake, the first iteration must issue exactly
-        # two listtransactions calls (100, then 500); the 500 scan must not
-        # be repeated by a second fallback in the worker.
+        # On a wallet with no stake, the first iteration must issue the
+        # 100-then-500 scan exactly once (no second fallback in the worker),
+        # then a single-entry query to seed the scan marker.
         import main
 
         def rpc_call(method, params=None):
@@ -305,8 +307,141 @@ class TestGridcoinDaemon(unittest.TestCase):
         lt_params = [
             c.args[1] for c in mock_grc.call.call_args_list if c.args[0] == "listtransactions"
         ]
-        self.assertEqual(lt_params, [["*", 100], ["*", 500]])
+        # Third call seeds the marker for the incremental periodic scan.
+        self.assertEqual(lt_params, [["*", 100], ["*", 500], ["*", 1]])
         mock_discord.update.assert_called_once()
+
+    @staticmethod
+    def _listtransactions_like(all_txs):
+        """Mimic listtransactions "*" count [from]: oldest-first slice, `from` skips newest."""
+        def _impl(params):
+            count = params[1]
+            skip = params[2] if len(params) > 2 else 0
+            end = max(len(all_txs) - skip, 0)
+            start = max(end - count, 0)
+            return all_txs[start:end]
+        return _impl
+
+    def _run_worker_two_iterations(self, first_wallet, second_wallet):
+        """Run polling_worker for an initial scan plus one periodic check.
+
+        Returns (list of `start` values passed to Discord, listtransactions
+        params issued during the periodic check).
+        """
+        import main
+
+        wallet = {"txs": first_wallet}
+        lt_params = []
+        phase = {"periodic": False}
+
+        def rpc_call(method, params=None):
+            if method == "getmininginfo":
+                return {}
+            if method == "explainmagnitude":
+                return []
+            if method == "listtransactions":
+                if phase["periodic"]:
+                    lt_params.append(list(params))
+                return self._listtransactions_like(wallet["txs"])(params)
+            raise AssertionError(f"unexpected RPC {method}")
+
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.side_effect = rpc_call
+
+        clock = {"now": 0.0}
+        starts = []
+        mock_discord = MagicMock(spec=DiscordPresenceManager)
+
+        def on_update(**kwargs):
+            starts.append(kwargs.get("start"))
+            if len(starts) == 1:
+                wallet["txs"] = second_wallet
+                phase["periodic"] = True
+                clock["now"] += 61  # next iteration crosses the 60 s periodic threshold
+            else:
+                main.running = False
+            return True
+
+        mock_discord.update.side_effect = on_update
+
+        with patch("main.running", True), patch("main.presence_enabled", True), \
+             patch("main.time.time", side_effect=lambda: clock["now"]), \
+             patch("main.time.sleep"):
+            main.polling_worker(mock_grc, mock_discord)
+
+        return starts, lt_params
+
+    def test_polling_worker_periodic_check_is_incremental(self):
+        # Steady state: a dozen non-stake entries arrived since the initial
+        # scan, pushing the last stake out of the 10 newest. The periodic check
+        # must read one page and stop at the marker, not fall back to a
+        # 500-entry query.
+        old_stake = {"category": "generate", "txid": "A", "time": 1000, "confirmations": 50}
+        newer = [
+            {"category": "receive", "txid": f"n{i}", "time": 1100 + i, "confirmations": 1}
+            for i in range(12)
+        ]
+        starts, lt_params = self._run_worker_two_iterations([old_stake], [old_stake] + newer)
+        self.assertEqual(starts, [1000, 1000])
+        self.assertEqual(lt_params, [["*", 50, 0]])
+
+    def test_polling_worker_periodic_check_finds_stake_beyond_500_entries(self):
+        # A flood of entries (more than the 500-entry fallback window) lands
+        # between two checks. The new stake behind them must still be found.
+        old_stake = {"category": "generate", "txid": "A", "time": 1000, "confirmations": 50}
+        new_stake = {"category": "generate", "txid": "S", "time": 2000, "confirmations": 3}
+        flood = [
+            {"category": "receive", "txid": f"n{i}", "time": 2100 + i, "confirmations": 1}
+            for i in range(510)
+        ]
+        starts, lt_params = self._run_worker_two_iterations(
+            [old_stake], [old_stake, new_stake] + flood
+        )
+        self.assertEqual(starts, [1000, 2000])
+        # Paged back 50 at a time until the marker was reached.
+        self.assertEqual(lt_params[0], ["*", 50, 0])
+        self.assertEqual(lt_params[-1], ["*", 50, 500])
+        self.assertEqual(len(lt_params), 11)
+
+    def test_scan_new_stakes_stops_at_marker(self):
+        txs = [
+            {"category": "generate", "txid": "old", "time": 100, "confirmations": 9},
+            {"category": "receive", "txid": "M", "time": 200, "confirmations": 5},
+            {"category": "immature", "txid": "S", "time": 300, "confirmations": 2},
+            {"category": "send", "txid": "N", "time": 400, "confirmations": 1},
+        ]
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.side_effect = lambda m, p=None: self._listtransactions_like(txs)(p)
+        ts, marker = scan_new_stakes(mock_grc, "M", page_size=2)
+        # Stake "old" is behind the marker and must be ignored; the marker is
+        # on the second 2-entry page, so exactly two pages are read.
+        self.assertEqual((ts, marker), (300, "N"))
+        self.assertEqual(mock_grc.call.call_count, 2)
+
+    def test_scan_new_stakes_ignores_orphans_and_handles_no_marker(self):
+        txs = [
+            {"category": "generate", "txid": "S", "time": 300, "confirmations": 2},
+            {"category": "generate", "txid": "O", "time": 400, "confirmations": -1},
+        ]
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.side_effect = lambda m, p=None: self._listtransactions_like(txs)(p)
+        self.assertEqual(scan_new_stakes(mock_grc, None), (300, "O"))
+        self.assertEqual(scan_new_stakes(mock_grc, "zzz"), (300, "O"))
+
+    def test_scan_new_stakes_rpc_error(self):
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.side_effect = ConnectionError("Node unreachable")
+        self.assertEqual(scan_new_stakes(mock_grc, "M"), (None, None))
+
+    def test_get_newest_txid(self):
+        mock_grc = MagicMock(spec=GridcoinRPC)
+        mock_grc.call.return_value = [{"txid": "a"}, {"txid": "b"}]
+        self.assertEqual(get_newest_txid(mock_grc), "b")
+        mock_grc.call.assert_called_once_with("listtransactions", ["*", 1])
+        mock_grc.call.return_value = []
+        self.assertIsNone(get_newest_txid(mock_grc))
+        mock_grc.call.side_effect = ConnectionError("down")
+        self.assertIsNone(get_newest_txid(mock_grc))
 
     def test_get_last_stake_timestamp_error(self):
         mock_grc = MagicMock(spec=GridcoinRPC)
