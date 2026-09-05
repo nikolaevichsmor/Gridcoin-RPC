@@ -1,6 +1,9 @@
+import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import signal
 import socket
 import sys
 import threading
@@ -25,8 +28,15 @@ BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-# Configure logging (supports both console and hidden pythonw execution)
-log_handlers = [logging.FileHandler(BASE_DIR / "daemon.log", encoding="utf-8")]
+# Writable application directory (for settings.json, daemon.log)
+APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else BASE_DIR
+SETTINGS_FILE = APP_DIR / "settings.json"
+LOG_FILE = APP_DIR / "daemon.log"
+
+# Configure rotating logging (max 5 MB with 2 backups to prevent disk bloat)
+log_handlers = [
+    RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8")
+]
 if sys.stdout is not None:
     log_handlers.append(logging.StreamHandler(sys.stdout))
 
@@ -38,8 +48,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("GridcoinDiscordRPC")
 
-# Load environment configuration from project directory
+# Load environment configuration from project directory or app directory
 load_dotenv(BASE_DIR / ".env")
+if APP_DIR != BASE_DIR and (APP_DIR / ".env").is_file():
+    load_dotenv(APP_DIR / ".env")
 
 CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "1545044211945177139")
 RPC_USER = os.getenv("RPC_USER", "")
@@ -55,13 +67,85 @@ GITHUB_BUTTON_LABEL = "GitHub"
 GRIDCOIN_WEBSITE_URL = "https://gridcoin.us/"
 GRIDCOIN_WEBSITE_LABEL = "What is this?"
 
+DISCORD_LARGE_IMAGE = os.getenv("DISCORD_LARGE_IMAGE", "gridcoin")
+DISCORD_LARGE_TEXT = os.getenv("DISCORD_LARGE_TEXT", "Gridcoin Network")
+DISCORD_SMALL_IMAGE_STAKING = os.getenv("DISCORD_SMALL_IMAGE_STAKING", "staking")
+DISCORD_SMALL_IMAGE_OFFLINE = os.getenv("DISCORD_SMALL_IMAGE_OFFLINE", "offline")
+
+DEFAULT_SETTINGS = {
+    "presence_enabled": True,
+    "cycle_show_reward": True,
+    "cycle_show_difficulty": False,
+    "cycle_show_rac": False,
+    "cycle_show_mag": False,
+    "cycle_show_block": False,
+    "cycle_show_pool_share": False,
+}
+
+
+def load_settings() -> dict:
+    """Load user settings from settings.json or return defaults."""
+    settings = dict(DEFAULT_SETTINGS)
+    if SETTINGS_FILE.is_file():
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k in DEFAULT_SETTINGS:
+                    if k in data and isinstance(data[k], bool):
+                        settings[k] = data[k]
+                active_flags = [
+                    settings["cycle_show_reward"],
+                    settings["cycle_show_difficulty"],
+                    settings["cycle_show_rac"],
+                    settings["cycle_show_mag"],
+                    settings["cycle_show_block"],
+                    settings["cycle_show_pool_share"],
+                ]
+                if not any(active_flags):
+                    settings["cycle_show_reward"] = True
+        except Exception as e:
+            logger.warning(f"Could not read settings from {SETTINGS_FILE}: {e}")
+    return settings
+
+
+def save_settings() -> bool:
+    """Persist current user settings to settings.json."""
+    data = {
+        "presence_enabled": presence_enabled,
+        "cycle_show_reward": cycle_show_reward,
+        "cycle_show_difficulty": cycle_show_difficulty,
+        "cycle_show_rac": cycle_show_rac,
+        "cycle_show_mag": cycle_show_mag,
+        "cycle_show_block": cycle_show_block,
+        "cycle_show_pool_share": cycle_show_pool_share,
+    }
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except OSError as e:
+        logger.warning(f"Failed writing settings to {SETTINGS_FILE}: {e}")
+        return False
+
+
 # Global state for tray and single instance
+_initial_settings = load_settings()
 _lock_socket = None
 running = True
-presence_enabled = True
+presence_enabled = _initial_settings["presence_enabled"]
 discord_mgr: Optional["DiscordPresenceManager"] = None
 AUTOSTART_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_APP_NAME = "Gridcoin-RPC"
+
+# Display state cycling toggles (Line 2 of Rich Presence)
+cycle_show_reward: bool = _initial_settings["cycle_show_reward"]
+cycle_show_difficulty: bool = _initial_settings["cycle_show_difficulty"]
+cycle_show_rac: bool = _initial_settings["cycle_show_rac"]
+cycle_show_mag: bool = _initial_settings["cycle_show_mag"]
+cycle_show_block: bool = _initial_settings["cycle_show_block"]
+cycle_show_pool_share: bool = _initial_settings["cycle_show_pool_share"]
+update_event = threading.Event()
 
 
 def get_executable_path() -> str:
@@ -235,17 +319,56 @@ def get_active_staking_coins(mining_info: dict) -> float:
     return 0.0
 
 
-def format_details(active_coins: float) -> str:
-    """Format details string according to staking coin count."""
+def is_wallet_staking(mining_or_staking_info: Any) -> Optional[bool]:
+    """Extract boolean staking status from getstakinginfo or getmininginfo response."""
+    if isinstance(mining_or_staking_info, dict):
+        val = mining_or_staking_info.get("staking")
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, str)):
+            return str(val).lower() in ("true", "1")
+    return None
+
+
+def format_details(active_coins: float, is_staking: Optional[bool] = None) -> str:
+    """Format details string according to staking coin count and active staking status."""
+    if is_staking is False:
+        if active_coins > 0:
+            return f"Not Staking: {active_coins:,.2f} GRC"
+        return "Staking: Inactive"
     if active_coins <= 0:
         return "Staking: 0.00 GRC"
     return f"Staking: {active_coins:,.2f} GRC"
 
 
+def get_presence_assets(is_offline: bool = False, is_staking: Optional[bool] = None) -> dict:
+    """Return dictionary of Discord presence image assets and hover tooltips."""
+    assets = {}
+    if DISCORD_LARGE_IMAGE:
+        assets["large_image"] = DISCORD_LARGE_IMAGE
+        if DISCORD_LARGE_TEXT:
+            assets["large_text"] = DISCORD_LARGE_TEXT
+
+    if is_offline:
+        if DISCORD_SMALL_IMAGE_OFFLINE:
+            assets["small_image"] = DISCORD_SMALL_IMAGE_OFFLINE
+            assets["small_text"] = "Wallet Offline"
+    elif is_staking is False:
+        if DISCORD_SMALL_IMAGE_OFFLINE:
+            assets["small_image"] = DISCORD_SMALL_IMAGE_OFFLINE
+            assets["small_text"] = "Staking Inactive / Locked"
+    elif is_staking is True or is_staking is None:
+        if DISCORD_SMALL_IMAGE_STAKING:
+            assets["small_image"] = DISCORD_SMALL_IMAGE_STAKING
+            assets["small_text"] = "Staking Active"
+
+    return assets
+
+
 def get_expected_reward(mining_info: dict) -> float:
     """Extract expected research reward from BoincRewardPending (matches wallet GUI)."""
     if not isinstance(mining_info, dict):
-        return 10.0
+        return 0.0
     pending = mining_info.get("BoincRewardPending")
     if pending is not None:
         try:
@@ -254,11 +377,13 @@ def get_expected_reward(mining_info: dict) -> float:
                 return val
         except (ValueError, TypeError):
             pass
-    return 10.0
+    return 0.0
 
 
-def format_reward(reward: float) -> str:
-    """Format estimated stake reward string."""
+def format_reward(reward: Optional[float]) -> str:
+    """Format estimated stake reward string. If reward is 0 or None, display block search status."""
+    if reward is None or reward <= 0:
+        return "Searching for Blocks"
     return f"Est. Reward: {reward:,.2f} GRC"
 
 
@@ -327,36 +452,315 @@ def get_top_project_rac(explain_magnitude_data: Any) -> Optional[str]:
     return f"{top_proj} RAC: {round(top_rac):,}"
 
 
+def format_magnitude(raw_mag: Any) -> str:
+    """Format magnitude string. Null, 0, or missing returns 'Magnitude: None'."""
+    if raw_mag is None or raw_mag == 0 or raw_mag == "0":
+        return "Magnitude: None"
+    try:
+        val = float(raw_mag)
+        if val <= 0:
+            return "Magnitude: None"
+        if val.is_integer():
+            return f"Magnitude: {int(val)}"
+        return f"Magnitude: {val:,.2f}"
+    except (ValueError, TypeError):
+        return f"Magnitude: {raw_mag}"
+
+
+def get_total_magnitude(explain_magnitude_data: Any = None, mining_info: Any = None) -> Optional[float]:
+    """Extract total BOINC magnitude from explainmagnitude or getmininginfo."""
+    if isinstance(explain_magnitude_data, list):
+        for item in explain_magnitude_data:
+            if isinstance(item, dict) and item.get("project", "").lower() == "total":
+                try:
+                    return float(item.get("magnitude", 0))
+                except (ValueError, TypeError):
+                    pass
+
+    if isinstance(mining_info, dict):
+        raw_mag = mining_info.get("magnitude")
+        if raw_mag is not None:
+            try:
+                return float(raw_mag)
+            except (ValueError, TypeError):
+                pass
+        stk = mining_info.get("staking")
+        if isinstance(stk, dict) and "magnitude" in stk:
+            try:
+                return float(stk["magnitude"])
+            except (ValueError, TypeError):
+                pass
+
+    return None
+
+
+def get_block_height(mining_info: dict) -> Optional[int]:
+    """Extract current block height from getmininginfo response."""
+    if not isinstance(mining_info, dict):
+        return None
+    blocks = mining_info.get("blocks")
+    if blocks is not None:
+        try:
+            return int(blocks)
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def format_block_height(blocks: Any) -> str:
+    """Format current block height string."""
+    try:
+        val = int(blocks)
+        if val > 0:
+            return f"Block: #{val:,}"
+    except (ValueError, TypeError):
+        pass
+    return "Block: Unknown"
+
+
+def get_network_stake_weight(mining_info: dict) -> float:
+    """Extract estimated total network staking GRC weight from RPC response.
+
+    Gridcoin returns 'netstakingGRCvalue' (estimated total GRC currently staking)
+    and 'netstakeweight' (raw network weight, which has an internal factor of 80x).
+    We prefer 'netstakingGRCvalue' to compare against the user's active coins in GRC.
+    If only 'netstakeweight' is available, we divide by 80.0 to convert to GRC coins.
+    """
+    if not isinstance(mining_info, dict):
+        return 0.0
+
+    # 1. Prefer direct netstakingGRCvalue (actual GRC coins staking across the network)
+    for key in ("netstakingGRCvalue", "netstakinggrcvalue", "net_staking_grc_value"):
+        val = mining_info.get(key)
+        if val is not None:
+            try:
+                f_val = float(val)
+                if f_val > 0:
+                    return f_val
+            except (ValueError, TypeError):
+                pass
+
+    # 2. Fallback to netstakeweight / 80.0
+    net_weight = mining_info.get("netstakeweight")
+    if net_weight is not None:
+        try:
+            f_weight = float(net_weight)
+            if f_weight > 0:
+                return f_weight / 80.0
+        except (ValueError, TypeError):
+            pass
+
+    return 0.0
+
+
+def format_pool_share(active_coins: float, net_weight: float) -> str:
+    """Format active staking pool share percentage."""
+    if net_weight <= 0 or active_coins <= 0:
+        return "Pool Share: 0.00%"
+    share = (active_coins / net_weight) * 100.0
+    if share > 100.0:
+        share = 100.0
+    if share < 0.01:
+        return f"Pool Share: {share:.4f}%"
+    return f"Pool Share: {share:.2f}%"
+
+
 def get_alternating_state(
     cycle: int,
     switch_cycles: int,
     reward: float,
     difficulty: float,
     project_rac: Optional[str] = None,
+    total_mag: Optional[float] = None,
+    block_height: Optional[int] = None,
+    pool_share_str: Optional[str] = None,
+    show_reward: bool = True,
+    show_difficulty: bool = True,
+    show_rac: bool = True,
+    show_mag: bool = False,
+    show_block: bool = False,
+    show_pool_share: bool = False,
 ) -> str:
-    """Alternate between Est. Reward, Difficulty, and Project RAC every switch_cycles update cycles."""
+    """Alternate between active display metrics every switch_cycles update cycles."""
+    candidates = []
+    if show_reward:
+        candidates.append(format_reward(reward))
+    if show_difficulty:
+        candidates.append(format_difficulty(difficulty))
+    if show_rac and project_rac:
+        candidates.append(project_rac)
+    if show_mag and total_mag is not None:
+        candidates.append(format_magnitude(total_mag))
+    if show_block and block_height is not None:
+        candidates.append(format_block_height(block_height))
+    if show_pool_share and pool_share_str:
+        candidates.append(pool_share_str)
+
+    if not candidates:
+        if show_rac:
+            candidates.append("RAC: None")
+        elif show_block:
+            candidates.append("Block: Unknown")
+        elif show_pool_share:
+            candidates.append("Pool Share: 0.00%")
+        elif show_mag:
+            candidates.append("Magnitude: None")
+        elif show_difficulty:
+            candidates.append(format_difficulty(difficulty))
+        else:
+            candidates.append(format_reward(reward))
+
     effective_switch = max(int(switch_cycles), 1)
     step = cycle // effective_switch
-
-    if project_rac:
-        mode = step % 3
-        if mode == 0:
-            return format_reward(reward)
-        elif mode == 1:
-            return format_difficulty(difficulty)
-        else:
-            return project_rac
-    else:
-        if step % 2 == 0:
-            return format_reward(reward)
-        return format_difficulty(difficulty)
+    return candidates[step % len(candidates)]
 
 
-def format_magnitude(raw_mag: Any) -> str:
-    """Format magnitude string. Null, 0, or missing strictly returns 'Mag: None'."""
-    if raw_mag is None or raw_mag == 0 or raw_mag == "0":
-        return "Mag: None"
-    return f"Mag: {raw_mag}"
+def trigger_presence_update() -> None:
+    """Signal background worker to perform an immediate presence refresh."""
+    update_event.set()
+
+
+def handle_exit_signal(signum, frame=None):
+    """Handle graceful termination on SIGINT or SIGTERM."""
+    global running, discord_mgr
+    sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+    logger.info(f"Received exit signal {sig_name}. Shutting down gracefully...")
+    running = False
+    trigger_presence_update()
+    if discord_mgr:
+        discord_mgr.close()
+    sys.exit(0)
+
+
+try:
+    signal.signal(signal.SIGINT, handle_exit_signal)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handle_exit_signal)
+except (ValueError, OSError):
+    pass
+
+
+def toggle_stat(stat_name: str) -> bool:
+    """Toggle a display stat in line 2, ensuring at least one remains enabled.
+
+    Returns True if state changed, False if blocked by the constraint.
+    """
+    global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
+    global cycle_show_mag, cycle_show_block, cycle_show_pool_share
+
+    active_count = sum([
+        cycle_show_reward,
+        cycle_show_difficulty,
+        cycle_show_rac,
+        cycle_show_mag,
+        cycle_show_block,
+        cycle_show_pool_share,
+    ])
+    toggled = False
+
+    if stat_name in ("reward", "Estimated Reward"):
+        if cycle_show_reward and active_count <= 1:
+            logger.info("Cannot disable Estimated Reward: at least one display stat must remain active.")
+            return False
+        cycle_show_reward = not cycle_show_reward
+        logger.info(f"Toggled Estimated Reward: {cycle_show_reward}")
+        toggled = True
+    elif stat_name in ("difficulty", "Difficulty"):
+        if cycle_show_difficulty and active_count <= 1:
+            logger.info("Cannot disable Difficulty: at least one display stat must remain active.")
+            return False
+        cycle_show_difficulty = not cycle_show_difficulty
+        logger.info(f"Toggled Difficulty: {cycle_show_difficulty}")
+        toggled = True
+    elif stat_name in ("rac", "Top Project RAC"):
+        if cycle_show_rac and active_count <= 1:
+            logger.info("Cannot disable Top Project RAC: at least one display stat must remain active.")
+            return False
+        cycle_show_rac = not cycle_show_rac
+        logger.info(f"Toggled Top Project RAC: {cycle_show_rac}")
+        toggled = True
+    elif stat_name in ("mag", "magnitude", "Total Magnitude", "Magnitude"):
+        if cycle_show_mag and active_count <= 1:
+            logger.info("Cannot disable Total Magnitude: at least one display stat must remain active.")
+            return False
+        cycle_show_mag = not cycle_show_mag
+        logger.info(f"Toggled Total Magnitude: {cycle_show_mag}")
+        toggled = True
+    elif stat_name in ("block", "Block Height", "Block Number"):
+        if cycle_show_block and active_count <= 1:
+            logger.info("Cannot disable Block Height: at least one display stat must remain active.")
+            return False
+        cycle_show_block = not cycle_show_block
+        logger.info(f"Toggled Block Height: {cycle_show_block}")
+        toggled = True
+    elif stat_name in ("pool_share", "share", "Pool Share"):
+        if cycle_show_pool_share and active_count <= 1:
+            logger.info("Cannot disable Pool Share: at least one display stat must remain active.")
+            return False
+        cycle_show_pool_share = not cycle_show_pool_share
+        logger.info(f"Toggled Pool Share: {cycle_show_pool_share}")
+        toggled = True
+
+    if toggled:
+        save_settings()
+        return True
+
+    return False
+
+
+def _get_menu_id_map(menu_options) -> dict:
+    """Recursively map menu item titles to their Windows menu option IDs."""
+    id_map = {}
+
+    def _recurse(opts):
+        for item in opts:
+            if not isinstance(item, (list, tuple)) or len(item) < 4:
+                continue
+            text = item[0]
+            action = item[2]
+            opt_id = item[3]
+            id_map[text] = opt_id
+            if isinstance(action, (list, tuple)):
+                _recurse(action)
+
+    _recurse(menu_options)
+    return id_map
+
+
+def update_tray_menu_checks(systray) -> None:
+    """Update checkmark states for all toggleable menu items in the tray."""
+    if sys.platform != "win32":
+        return
+    menu = getattr(systray, "_menu", None)
+    if not menu:
+        return
+    u32 = ctypes.windll.user32
+    id_map = _get_menu_id_map(getattr(systray, "_menu_options", []))
+
+    # 1. Start with Windows
+    if "Start with Windows" in id_map:
+        flag = 0x00000008 if is_autostart_enabled() else 0x00000000
+        try:
+            u32.CheckMenuItem(menu, id_map["Start with Windows"], flag)
+        except Exception:
+            pass
+
+    # 2. Cycle Stats (Line 2) subitems
+    stat_flags = {
+        "Estimated Reward": cycle_show_reward,
+        "Difficulty": cycle_show_difficulty,
+        "Top Project RAC": cycle_show_rac,
+        "Total Magnitude": cycle_show_mag,
+        "Block Height": cycle_show_block,
+        "Pool Share": cycle_show_pool_share,
+    }
+    for name, is_active in stat_flags.items():
+        if name in id_map:
+            flag = 0x00000008 if is_active else 0x00000000
+            try:
+                u32.CheckMenuItem(menu, id_map[name], flag)
+            except Exception:
+                pass
 
 
 def get_last_stake_timestamp(grc: GridcoinRPC, count: int = 100) -> Optional[int]:
@@ -522,17 +926,25 @@ class DiscordPresenceManager:
 def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     """Background thread worker that polls Gridcoin RPC and updates Discord."""
     global running, presence_enabled
+    global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
+    global cycle_show_mag, cycle_show_block, cycle_show_pool_share
+
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
     last_rac_check = 0.0
     stake_marker: Optional[str] = None
     top_project_rac: Optional[str] = None
+    total_mag: Optional[float] = None
     initial_scan_done = False
     cycle_count = 0
 
     while running:
         if not presence_enabled:
-            time.sleep(1)
+            for _ in range(10):
+                if not running or presence_enabled or update_event.is_set():
+                    break
+                time.sleep(0.1)
+            update_event.clear()
             continue
 
         try:
@@ -541,25 +953,56 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
             active_coins = get_active_staking_coins(mining_info)
             expected_reward = get_expected_reward(mining_info)
             difficulty = get_difficulty(mining_info)
-            details_str = format_details(active_coins)
+            net_weight = get_network_stake_weight(mining_info)
+            block_height = get_block_height(mining_info)
 
-            # Check for top BOINC project RAC periodically
+            # Check if wallet is actively staking (e.g. unlocked for staking)
+            is_staking = is_wallet_staking(mining_info)
+            staking_info = None
+            if is_staking is None or net_weight <= 0:
+                try:
+                    staking_info = grc.call("getstakinginfo")
+                    if is_staking is None:
+                        is_staking = is_wallet_staking(staking_info)
+                    if net_weight <= 0 and isinstance(staking_info, dict):
+                        net_weight = get_network_stake_weight(staking_info)
+                except Exception:
+                    pass
+
+            pool_share_str = format_pool_share(active_coins, net_weight)
+
+            details_str = format_details(active_coins, is_staking=is_staking)
+
+            # Check for top BOINC project RAC and total magnitude periodically
             current_time = time.time()
             if current_time - last_rac_check > 60 or top_project_rac is None:
                 try:
                     explain_data = grc.call("explainmagnitude")
                     top_project_rac = get_top_project_rac(explain_data)
+                    total_mag = get_total_magnitude(explain_data, mining_info)
                 except Exception as err:
                     logger.debug(f"Failed to fetch explainmagnitude: {err}")
                 last_rac_check = current_time
 
-            # 2. Alternating State (Est. Reward <-> Difficulty <-> Top Project RAC every N cycles)
+            if total_mag is None:
+                total_mag = get_total_magnitude(None, mining_info)
+
+            # 2. Alternating State (cycles between all active metrics)
             state_str = get_alternating_state(
                 cycle_count,
                 SWITCH_CYCLES,
                 expected_reward,
                 difficulty,
-                top_project_rac,
+                project_rac=top_project_rac,
+                total_mag=total_mag,
+                block_height=block_height,
+                pool_share_str=pool_share_str,
+                show_reward=cycle_show_reward,
+                show_difficulty=cycle_show_difficulty,
+                show_rac=cycle_show_rac,
+                show_mag=cycle_show_mag,
+                show_block=cycle_show_block,
+                show_pool_share=cycle_show_pool_share,
             )
             cycle_count += 1
 
@@ -595,6 +1038,10 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 if buttons:
                     update_payload["buttons"] = buttons
 
+                assets = get_presence_assets(is_offline=False, is_staking=is_staking)
+                if assets:
+                    update_payload.update(assets)
+
                 discord.update(**update_payload)
                 logger.info(
                     f"Presence updated: [{details_str}] | [{state_str}] | "
@@ -611,16 +1058,20 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 buttons = get_presence_buttons()
                 if buttons:
                     offline_payload["buttons"] = buttons
+                assets = get_presence_assets(is_offline=True)
+                if assets:
+                    offline_payload.update(assets)
                 discord.update(**offline_payload)
         except Exception as err:
             logger.error(f"Unexpected error in polling loop: {err}", exc_info=True)
             time.sleep(5)
 
         # Responsive sleep loop
-        for _ in range(POLL_INTERVAL):
-            if not running or not presence_enabled:
+        for _ in range(POLL_INTERVAL * 10):
+            if not running or not presence_enabled or update_event.is_set():
                 break
-            time.sleep(1)
+            time.sleep(0.1)
+        update_event.clear()
 
 
 def main():
@@ -662,23 +1113,47 @@ def main():
     def on_tray_toggle(systray):
         global presence_enabled, discord_mgr
         presence_enabled = not presence_enabled
+        save_settings()
         state_msg = "enabled" if presence_enabled else "paused"
         logger.info(f"Presence {state_msg} via system tray.")
         if not presence_enabled and discord_mgr:
             discord_mgr.clear()
+        trigger_presence_update()
+
+    def on_toggle_reward(systray):
+        if toggle_stat("reward"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
+    def on_toggle_difficulty(systray):
+        if toggle_stat("difficulty"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
+    def on_toggle_rac(systray):
+        if toggle_stat("rac"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
+    def on_toggle_mag(systray):
+        if toggle_stat("magnitude"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
+    def on_toggle_block(systray):
+        if toggle_stat("block"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
+    def on_toggle_pool_share(systray):
+        if toggle_stat("pool_share"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
 
     def on_tray_autostart(systray):
         new_state = not is_autostart_enabled()
         if set_autostart(new_state):
-            if getattr(systray, "_menu", None):
-                for opt in getattr(systray, "_menu_options", []):
-                    if len(opt) >= 4 and opt[0] == "Start with Windows":
-                        flag = 0x00000008 if new_state else 0x00000000
-                        try:
-                            ctypes.windll.user32.CheckMenuItem(systray._menu, opt[3], flag)
-                        except Exception:
-                            pass
-                        break
+            update_tray_menu_checks(systray)
 
     def on_tray_github(systray):
         if GITHUB_REPO_URL:
@@ -692,6 +1167,7 @@ def main():
         global running, discord_mgr
         logger.info("Exiting application via system tray.")
         running = False
+        trigger_presence_update()
         if discord_mgr:
             discord_mgr.close()
 
@@ -699,8 +1175,17 @@ def main():
     if sys.platform == "win32":
         icon_path = get_icon_file_path()
         if icon_path:
+            cycle_suboptions = (
+                ("Estimated Reward", None, on_toggle_reward),
+                ("Difficulty", None, on_toggle_difficulty),
+                ("Top Project RAC", None, on_toggle_rac),
+                ("Total Magnitude", None, on_toggle_mag),
+                ("Block Height", None, on_toggle_block),
+                ("Pool Share", None, on_toggle_pool_share),
+            )
             menu_options = (
                 ("Turn Off / On Presence", None, on_tray_toggle),
+                ("Cycle Stats (Line 2)", None, cycle_suboptions),
                 ("Start with Windows", None, on_tray_autostart),
                 ("What is Gridcoin? (Website)", None, on_tray_website),
                 ("GitHub Repository", None, on_tray_github),
@@ -712,16 +1197,23 @@ def main():
 
                 def patched_create_menu(menu, menu_opts):
                     original_create_menu(menu, menu_opts)
-                    for opt in menu_opts:
-                        if len(opt) >= 4 and opt[0] == "Start with Windows":
-                            flag = 0x00000008 if is_autostart_enabled() else 0x00000000
-                            try:
-                                ctypes.windll.user32.CheckMenuItem(menu, opt[3], flag)
-                            except Exception:
-                                pass
-                            break
+                    if menu == tray._menu:
+                        update_tray_menu_checks(tray)
 
                 tray._create_menu = patched_create_menu
+
+                original_show_menu = tray._show_menu
+
+                def patched_show_menu():
+                    if tray._menu is None:
+                        from infi.systray.win32_adapter import CreatePopupMenu
+                        tray._menu = CreatePopupMenu()
+                        tray._create_menu(tray._menu, tray._menu_options)
+                    update_tray_menu_checks(tray)
+                    original_show_menu()
+
+                tray._show_menu = patched_show_menu
+
                 tray.start()
             except Exception as err:
                 logger.warning(f"Could not start system tray: {err}")

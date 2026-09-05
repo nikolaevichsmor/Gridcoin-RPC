@@ -1,6 +1,6 @@
 pypresence>=4.3.0
 python-dotenv>=1.0.0
-infi.systray>=0.1.12.1
+infi.systray>=0.1.12.1; sys_platform == 'win32'
 
 
 

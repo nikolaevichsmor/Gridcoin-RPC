@@ -29,6 +29,19 @@ from main import (
     is_autostart_enabled,
     set_autostart,
     DiscordPresenceManager,
+    toggle_stat,
+    trigger_presence_update,
+    _get_menu_id_map,
+    update_tray_menu_checks,
+    is_wallet_staking,
+    get_presence_assets,
+    load_settings,
+    save_settings,
+    get_total_magnitude,
+    get_block_height,
+    format_block_height,
+    get_network_stake_weight,
+    format_pool_share,
 )
 from rpc_client import GridcoinRPC
 
@@ -71,19 +84,22 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertAlmostEqual(get_expected_reward({"BoincRewardPending": 1289.53}), 1289.53)
         self.assertEqual(format_reward(1289.53), "Est. Reward: 1,289.53 GRC")
 
-        # 2. Investor mode (no pending BOINC reward -> default 10 CBR)
-        self.assertEqual(get_expected_reward({"BoincRewardPending": 0.0}), 10.0)
-        self.assertEqual(get_expected_reward({}), 10.0)
-        self.assertEqual(get_expected_reward(None), 10.0)
-        self.assertEqual(format_reward(10.0), "Est. Reward: 10.00 GRC")
+        # 2. Investor mode (no pending BOINC reward -> returns 0.0, formats as 'Searching for Blocks')
+        self.assertEqual(get_expected_reward({"BoincRewardPending": 0.0}), 0.0)
+        self.assertEqual(get_expected_reward({}), 0.0)
+        self.assertEqual(get_expected_reward(None), 0.0)
+        self.assertEqual(format_reward(0.0), "Searching for Blocks")
+        self.assertEqual(format_reward(None), "Searching for Blocks")
+        self.assertEqual(format_reward(-5.0), "Searching for Blocks")
 
     def test_magnitude_formatting(self):
-        self.assertEqual(format_magnitude(142.5), "Mag: 142.5")
-        self.assertEqual(format_magnitude(100), "Mag: 100")
-        self.assertEqual(format_magnitude(0), "Mag: None")
-        self.assertEqual(format_magnitude(0.0), "Mag: None")
-        self.assertEqual(format_magnitude("0"), "Mag: None")
-        self.assertEqual(format_magnitude(None), "Mag: None")
+        self.assertEqual(format_magnitude(142.5), "Magnitude: 142.50")
+        self.assertEqual(format_magnitude(100), "Magnitude: 100")
+        self.assertEqual(format_magnitude(0), "Magnitude: None")
+        self.assertEqual(format_magnitude(0.0), "Magnitude: None")
+        self.assertEqual(format_magnitude("0"), "Magnitude: None")
+        self.assertEqual(format_magnitude(-5), "Magnitude: None")
+        self.assertEqual(format_magnitude(None), "Magnitude: None")
 
     def test_difficulty_extraction(self):
         # 1. Direct float difficulty
@@ -543,6 +559,400 @@ class TestGridcoinDaemon(unittest.TestCase):
                     res = set_autostart(False)
                     self.assertTrue(res)
                     mock_winreg.DeleteValue.assert_called_once_with(mock_key, "Gridcoin-RPC")
+
+    def test_toggle_stat_constraint(self):
+        import main
+        orig_reward = main.cycle_show_reward
+        orig_diff = main.cycle_show_difficulty
+        orig_rac = main.cycle_show_rac
+        orig_mag = main.cycle_show_mag
+        orig_block = main.cycle_show_block
+        orig_pool_share = main.cycle_show_pool_share
+
+        try:
+            main.cycle_show_reward = True
+            main.cycle_show_difficulty = True
+            main.cycle_show_rac = True
+            main.cycle_show_mag = False
+            main.cycle_show_block = False
+            main.cycle_show_pool_share = False
+
+            # 1. Toggle reward off -> succeeds
+            self.assertTrue(toggle_stat("reward"))
+            self.assertFalse(main.cycle_show_reward)
+            self.assertTrue(main.cycle_show_difficulty)
+            self.assertTrue(main.cycle_show_rac)
+
+            # 2. Toggle difficulty off -> succeeds
+            self.assertTrue(toggle_stat("Difficulty"))
+            self.assertFalse(main.cycle_show_difficulty)
+            self.assertTrue(main.cycle_show_rac)
+
+            # 3. Attempt to toggle rac off (last remaining active stat) -> MUST FAIL and stay True!
+            self.assertFalse(toggle_stat("rac"))
+            self.assertTrue(main.cycle_show_rac)
+
+            # 4. Re-enable difficulty -> succeeds
+            self.assertTrue(toggle_stat("difficulty"))
+            self.assertTrue(main.cycle_show_difficulty)
+
+            # 5. Now rac can be toggled off -> succeeds
+            self.assertTrue(toggle_stat("Top Project RAC"))
+            self.assertFalse(main.cycle_show_rac)
+
+            # 6. Attempt to toggle difficulty off (now the last active) -> MUST FAIL!
+            self.assertFalse(toggle_stat("difficulty"))
+            self.assertTrue(main.cycle_show_difficulty)
+
+            # 7. Enable new metrics and test toggling them
+            self.assertTrue(toggle_stat("Total Magnitude"))
+            self.assertTrue(main.cycle_show_mag)
+            self.assertTrue(toggle_stat("Block Height"))
+            self.assertTrue(main.cycle_show_block)
+            self.assertTrue(toggle_stat("Pool Share"))
+            self.assertTrue(main.cycle_show_pool_share)
+
+            # Disable difficulty, mag, block -> pool share is last remaining
+            self.assertTrue(toggle_stat("difficulty"))
+            self.assertTrue(toggle_stat("magnitude"))
+            self.assertTrue(toggle_stat("block"))
+            self.assertFalse(toggle_stat("pool_share"))
+            self.assertTrue(main.cycle_show_pool_share)
+
+            # 8. Invalid stat name returns False
+            self.assertFalse(toggle_stat("unknown_stat"))
+        finally:
+            main.cycle_show_reward = orig_reward
+            main.cycle_show_difficulty = orig_diff
+            main.cycle_show_rac = orig_rac
+            main.cycle_show_mag = orig_mag
+            main.cycle_show_block = orig_block
+            main.cycle_show_pool_share = orig_pool_share
+
+    def test_get_alternating_state_custom_selections(self):
+        reward = 50.00
+        diff = 15.00
+        rac_str = "Rosetta RAC: 4,500"
+
+        # 1. Only Reward active
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, rac_str, show_reward=True, show_difficulty=False, show_rac=False),
+            "Est. Reward: 50.00 GRC",
+        )
+        self.assertEqual(
+            get_alternating_state(1, 1, reward, diff, rac_str, show_reward=True, show_difficulty=False, show_rac=False),
+            "Est. Reward: 50.00 GRC",
+        )
+
+        # 2. Only Difficulty active
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, rac_str, show_reward=False, show_difficulty=True, show_rac=False),
+            "Difficulty: 15.00",
+        )
+
+        # 3. Only RAC active
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, rac_str, show_reward=False, show_difficulty=False, show_rac=True),
+            "Rosetta RAC: 4,500",
+        )
+
+        # 4. Only RAC active, but project_rac is None -> returns "RAC: None"
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, None, show_reward=False, show_difficulty=False, show_rac=True),
+            "RAC: None",
+        )
+
+        # 5. Reward + RAC active (Difficulty disabled)
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, rac_str, show_reward=True, show_difficulty=False, show_rac=True),
+            "Est. Reward: 50.00 GRC",
+        )
+        self.assertEqual(
+            get_alternating_state(1, 1, reward, diff, rac_str, show_reward=True, show_difficulty=False, show_rac=True),
+            "Rosetta RAC: 4,500",
+        )
+        self.assertEqual(
+            get_alternating_state(2, 1, reward, diff, rac_str, show_reward=True, show_difficulty=False, show_rac=True),
+            "Est. Reward: 50.00 GRC",
+        )
+
+        # 6. Difficulty + RAC active (Reward disabled)
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, rac_str, show_reward=False, show_difficulty=True, show_rac=True),
+            "Difficulty: 15.00",
+        )
+        self.assertEqual(
+            get_alternating_state(1, 1, reward, diff, rac_str, show_reward=False, show_difficulty=True, show_rac=True),
+            "Rosetta RAC: 4,500",
+        )
+
+        # 7. Fallback when all show_* are False -> returns Reward safely without error
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, rac_str, show_reward=False, show_difficulty=False, show_rac=False),
+            "Est. Reward: 50.00 GRC",
+        )
+
+        # 8. Magnitude active
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, total_mag=142.5, show_reward=False, show_difficulty=False, show_rac=False, show_mag=True),
+            "Magnitude: 142.50",
+        )
+
+        # 9. Block active
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, block_height=3201400, show_reward=False, show_difficulty=False, show_rac=False, show_block=True),
+            "Block: #3,201,400",
+        )
+
+        # 10. Pool Share active
+        self.assertEqual(
+            get_alternating_state(0, 1, reward, diff, pool_share_str="Pool Share: 0.05%", show_reward=False, show_difficulty=False, show_rac=False, show_pool_share=True),
+            "Pool Share: 0.05%",
+        )
+
+    def test_trigger_presence_update(self):
+        import main
+        main.update_event.clear()
+        self.assertFalse(main.update_event.is_set())
+        trigger_presence_update()
+        self.assertTrue(main.update_event.is_set())
+        main.update_event.clear()
+
+    def test_get_menu_id_map_and_checks(self):
+        sample_options = [
+            ("Turn Off / On Presence", None, lambda s: None, 1023),
+            (
+                "Cycle Stats (Line 2)",
+                None,
+                [
+                    ("Estimated Reward", None, lambda s: None, 1024),
+                    ("Difficulty", None, lambda s: None, 1025),
+                    ("Top Project RAC", None, lambda s: None, 1026),
+                    ("Total Magnitude", None, lambda s: None, 1027),
+                    ("Block Height", None, lambda s: None, 1028),
+                    ("Pool Share", None, lambda s: None, 1029),
+                ],
+                1030,
+            ),
+            ("Start with Windows", None, lambda s: None, 1031),
+        ]
+
+        id_map = _get_menu_id_map(sample_options)
+        self.assertEqual(id_map.get("Estimated Reward"), 1024)
+        self.assertEqual(id_map.get("Difficulty"), 1025)
+        self.assertEqual(id_map.get("Top Project RAC"), 1026)
+        self.assertEqual(id_map.get("Total Magnitude"), 1027)
+        self.assertEqual(id_map.get("Block Height"), 1028)
+        self.assertEqual(id_map.get("Pool Share"), 1029)
+        self.assertEqual(id_map.get("Start with Windows"), 1031)
+
+        # Test update_tray_menu_checks (Windows)
+        mock_systray = MagicMock()
+        mock_systray._menu = 9999
+        mock_systray._menu_options = sample_options
+
+        import ctypes
+        mock_u32 = MagicMock()
+        mock_windll = MagicMock(user32=mock_u32)
+        with patch("sys.platform", "win32"), \
+             patch("main.is_autostart_enabled", return_value=True), \
+             patch.object(ctypes, "windll", mock_windll, create=True):
+            update_tray_menu_checks(mock_systray)
+            # Should have called CheckMenuItem for Start with Windows and all 6 stats
+            self.assertEqual(mock_u32.CheckMenuItem.call_count, 7)
+
+        # Test update_tray_menu_checks on non-Windows (should return immediately)
+        with patch("sys.platform", "linux"):
+            update_tray_menu_checks(mock_systray)
+
+    def test_format_details_with_staking_status(self):
+        # 1. Staking active
+        self.assertEqual(format_details(12450.50, is_staking=True), "Staking: 12,450.50 GRC")
+        self.assertEqual(format_details(0.0, is_staking=True), "Staking: 0.00 GRC")
+
+        # 2. Wallet locked or staking disabled (is_staking is False)
+        self.assertEqual(format_details(12450.50, is_staking=False), "Not Staking: 12,450.50 GRC")
+        self.assertEqual(format_details(0.0, is_staking=False), "Staking: Inactive")
+
+        # 3. None (status unavailable -> backward compatible fallback)
+        self.assertEqual(format_details(12450.50, is_staking=None), "Staking: 12,450.50 GRC")
+
+    def test_is_wallet_staking(self):
+        # Boolean values
+        self.assertTrue(is_wallet_staking({"staking": True}))
+        self.assertFalse(is_wallet_staking({"staking": False}))
+
+        # Int / string representations
+        self.assertTrue(is_wallet_staking({"staking": 1}))
+        self.assertTrue(is_wallet_staking({"staking": "true"}))
+        self.assertFalse(is_wallet_staking({"staking": 0}))
+        self.assertFalse(is_wallet_staking({"staking": "false"}))
+
+        # Missing or invalid
+        self.assertIsNone(is_wallet_staking({}))
+        self.assertIsNone(is_wallet_staking(None))
+        self.assertIsNone(is_wallet_staking("invalid"))
+
+    def test_get_presence_assets(self):
+        # 1. Staking active
+        with patch("main.DISCORD_LARGE_IMAGE", "gridcoin"), \
+             patch("main.DISCORD_LARGE_TEXT", "Gridcoin Network"), \
+             patch("main.DISCORD_SMALL_IMAGE_STAKING", "staking"), \
+             patch("main.DISCORD_SMALL_IMAGE_OFFLINE", "offline"):
+            assets = get_presence_assets(is_offline=False, is_staking=True)
+            self.assertEqual(assets["large_image"], "gridcoin")
+            self.assertEqual(assets["large_text"], "Gridcoin Network")
+            self.assertEqual(assets["small_image"], "staking")
+            self.assertEqual(assets["small_text"], "Staking Active")
+
+            # 2. Staking inactive / locked
+            assets_locked = get_presence_assets(is_offline=False, is_staking=False)
+            self.assertEqual(assets_locked["small_image"], "offline")
+            self.assertEqual(assets_locked["small_text"], "Staking Inactive / Locked")
+
+            # 3. Wallet offline
+            assets_offline = get_presence_assets(is_offline=True)
+            self.assertEqual(assets_offline["small_image"], "offline")
+            self.assertEqual(assets_offline["small_text"], "Wallet Offline")
+
+        # 4. When image configs are empty string
+        with patch("main.DISCORD_LARGE_IMAGE", ""), \
+             patch("main.DISCORD_SMALL_IMAGE_STAKING", ""), \
+             patch("main.DISCORD_SMALL_IMAGE_OFFLINE", ""):
+            self.assertEqual(get_presence_assets(is_offline=False, is_staking=True), {})
+
+    def test_settings_persistence(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_settings = Path(tmpdir) / "settings.json"
+            with patch("main.SETTINGS_FILE", tmp_settings):
+                # Save settings
+                with patch("main.presence_enabled", False), \
+                     patch("main.cycle_show_reward", False), \
+                     patch("main.cycle_show_difficulty", True), \
+                     patch("main.cycle_show_rac", True):
+                    saved = save_settings()
+                    self.assertTrue(saved)
+                    self.assertTrue(tmp_settings.is_file())
+
+                # Load settings
+                loaded = load_settings()
+                self.assertFalse(loaded["presence_enabled"])
+                self.assertFalse(loaded["cycle_show_reward"])
+                self.assertTrue(loaded["cycle_show_difficulty"])
+                self.assertTrue(loaded["cycle_show_rac"])
+
+                # First-run when settings.json does not exist (only Estimated Reward enabled)
+                if tmp_settings.is_file():
+                    tmp_settings.unlink()
+                first_run = load_settings()
+                self.assertTrue(first_run["presence_enabled"])
+                self.assertTrue(first_run["cycle_show_reward"])
+                self.assertFalse(first_run["cycle_show_difficulty"])
+                self.assertFalse(first_run["cycle_show_rac"])
+                self.assertFalse(first_run["cycle_show_mag"])
+                self.assertFalse(first_run["cycle_show_block"])
+                self.assertFalse(first_run["cycle_show_pool_share"])
+
+                # Corrupted file returns defaults
+                with open(tmp_settings, "w", encoding="utf-8") as f:
+                    f.write("invalid json")
+                defaults = load_settings()
+                self.assertTrue(defaults["presence_enabled"])
+                self.assertTrue(defaults["cycle_show_reward"])
+                self.assertFalse(defaults["cycle_show_difficulty"])
+                self.assertFalse(defaults["cycle_show_rac"])
+                self.assertFalse(defaults["cycle_show_mag"])
+                self.assertFalse(defaults["cycle_show_block"])
+                self.assertFalse(defaults["cycle_show_pool_share"])
+
+                # File with all 6 stats False enforces at least one True (defaults reward to True)
+                with open(tmp_settings, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "cycle_show_reward": False,
+                        "cycle_show_difficulty": False,
+                        "cycle_show_rac": False,
+                        "cycle_show_mag": False,
+                        "cycle_show_block": False,
+                        "cycle_show_pool_share": False,
+                    }, f)
+                enforced = load_settings()
+                self.assertTrue(enforced["cycle_show_reward"])
+
+    def test_total_magnitude_extraction(self):
+        # 1. From explainmagnitude list with Total project
+        explain_data = [
+            {"project": "rosetta@home", "rac": 500, "magnitude": 12.5},
+            {"project": "Total", "rac": 500, "magnitude": 142.5},
+        ]
+        self.assertEqual(get_total_magnitude(explain_data), 142.5)
+
+        # 2. From mining_info root magnitude
+        self.assertEqual(get_total_magnitude(mining_info={"magnitude": 150.0}), 150.0)
+
+        # 3. From mining_info nested staking magnitude
+        self.assertEqual(get_total_magnitude(mining_info={"staking": {"magnitude": "88.2"}}), 88.2)
+
+        # 4. None / missing
+        self.assertIsNone(get_total_magnitude(None, {}))
+        self.assertIsNone(get_total_magnitude([], None))
+
+    def test_block_height_extraction_and_formatting(self):
+        # Extraction
+        self.assertEqual(get_block_height({"blocks": 3201400}), 3201400)
+        self.assertEqual(get_block_height({"blocks": "3201400"}), 3201400)
+        self.assertIsNone(get_block_height({"blocks": "invalid"}))
+        self.assertIsNone(get_block_height({}))
+        self.assertIsNone(get_block_height(None))
+
+        # Formatting
+        self.assertEqual(format_block_height(3201400), "Block: #3,201,400")
+        self.assertEqual(format_block_height("3201400"), "Block: #3,201,400")
+        self.assertEqual(format_block_height(0), "Block: Unknown")
+        self.assertEqual(format_block_height(-1), "Block: Unknown")
+        self.assertEqual(format_block_height(None), "Block: Unknown")
+
+    def test_network_stake_weight_and_pool_share(self):
+        # 1. Direct netstakingGRCvalue (actual GRC coins in staking pool)
+        self.assertEqual(get_network_stake_weight({"netstakingGRCvalue": 130000000.0}), 130000000.0)
+        self.assertEqual(get_network_stake_weight({"netstakingGRCvalue": "25000000"}), 25000000.0)
+
+        # 2. Raw netstakeweight (with 80.0x factor: 10,400,000,000 / 80 = 130,000,000)
+        self.assertEqual(get_network_stake_weight({"netstakeweight": 10400000000.0}), 130000000.0)
+        self.assertEqual(get_network_stake_weight({"netstakeweight": "80000000"}), 1000000.0)
+
+        # 3. Preference for netstakingGRCvalue when both are present
+        self.assertEqual(
+            get_network_stake_weight({"netstakeweight": 10400000000.0, "netstakingGRCvalue": 130000000.0}),
+            130000000.0,
+        )
+
+        # 4. Zero or missing
+        self.assertEqual(get_network_stake_weight({}), 0.0)
+        self.assertEqual(get_network_stake_weight(None), 0.0)
+
+        # Pool share formatting
+        # 60,000 / 130,000,000 = 0.04615% -> 0.05%
+        self.assertEqual(format_pool_share(60000.0, 130000000.0), "Pool Share: 0.05%")
+        # 12,500 / 25,000,000 = 0.0005 = 0.05%
+        self.assertEqual(format_pool_share(12500.0, 25000000.0), "Pool Share: 0.05%")
+        # Sub-0.01% with 4 decimals
+        # 100 / 25,000,000 = 0.000004 = 0.0004%
+        self.assertEqual(format_pool_share(100.0, 25000000.0), "Pool Share: 0.0004%")
+        # Zero cases
+        self.assertEqual(format_pool_share(0.0, 25000000.0), "Pool Share: 0.00%")
+        self.assertEqual(format_pool_share(1000.0, 0.0), "Pool Share: 0.00%")
+        self.assertEqual(format_pool_share(-100.0, 25000000.0), "Pool Share: 0.00%")
+        # Cap at 100%
+        self.assertEqual(format_pool_share(200.0, 100.0), "Pool Share: 100.00%")
+
+    def test_env_example_file_exists(self):
+        example_path = PROJECT_ROOT / ".env.example"
+        self.assertTrue(example_path.is_file(), ".env.example template file must exist in repository root")
+        content = example_path.read_text(encoding="utf-8")
+        self.assertIn("DISCORD_CLIENT_ID", content)
+        self.assertIn("RPC_USER", content)
+        self.assertIn("UPDATE_INTERVAL", content)
 
 
 if __name__ == "__main__":
