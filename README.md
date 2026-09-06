@@ -48,7 +48,7 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 
 The easiest way to run the daemon on Windows:
 
-1. Download **`Gridcoin-RPC-v1.2-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.2.1-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Unzip the archive to any folder.
 3. Make sure your Gridcoin wallet is open.
 4. Launch `Gridcoin-RPC.exe`.
@@ -78,7 +78,7 @@ Right-click the Gridcoin icon in your tray to:
 
 For Linux (x86_64), no Python installation is required:
 
-1. Download **`Gridcoin-RPC-v1.2-linux-x86_64.tar.gz`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.2.1-linux-x86_64.tar.gz`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Extract and run:
    ```bash
    tar -xzvf Gridcoin-RPC-*-linux-x86_64.tar.gz
