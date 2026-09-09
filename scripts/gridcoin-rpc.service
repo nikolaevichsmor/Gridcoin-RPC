@@ -1,0 +1,16 @@
+﻿[Unit]
+Description=Gridcoin Discord Rich Presence Daemon
+After=network.target
+
+[Service]
+Type=simple
+# For binary installations:
+# ExecStart=%h/.local/bin/gridcoin-rpc --headless
+# For Python source installations:
+ExecStart=/usr/bin/python3 %h/Gridcoin-RPC/main.py --headless
+WorkingDirectory=%h/Gridcoin-RPC
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
