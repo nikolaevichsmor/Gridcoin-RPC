@@ -1,5 +1,6 @@
 """Unit test suite for Gridcoin Discord RPC daemon."""
 
+import io
 import json
 import sys
 import unittest
@@ -18,21 +19,25 @@ from main import (
     format_block_height,
     format_details,
     format_difficulty,
+    format_grc_price,
     format_magnitude,
     format_pool_share,
     format_reward,
+    format_total_value_usd,
     get_active_staking_coins,
     get_alternating_state,
     get_block_height,
     get_difficulty,
     get_executable_path,
     get_expected_reward,
+    get_grc_usd_price,
     get_last_stake_timestamp,
     get_network_stake_weight,
     get_newest_txid,
     get_presence_assets,
     get_presence_buttons,
     get_top_project_rac,
+    get_total_balance,
     get_total_magnitude,
     is_autostart_enabled,
     is_wallet_staking,
@@ -682,6 +687,8 @@ class TestGridcoinDaemon(unittest.TestCase):
         orig_mag = main.cycle_show_mag
         orig_block = main.cycle_show_block
         orig_pool_share = main.cycle_show_pool_share
+        orig_total_value = main.cycle_show_total_value
+        orig_price = main.cycle_show_price
 
         try:
             main.cycle_show_reward = True
@@ -690,6 +697,8 @@ class TestGridcoinDaemon(unittest.TestCase):
             main.cycle_show_mag = False
             main.cycle_show_block = False
             main.cycle_show_pool_share = False
+            main.cycle_show_total_value = False
+            main.cycle_show_price = False
 
             # 1. Toggle reward off -> succeeds
             self.assertTrue(toggle_stat("reward"))
@@ -725,13 +734,19 @@ class TestGridcoinDaemon(unittest.TestCase):
             self.assertTrue(main.cycle_show_block)
             self.assertTrue(toggle_stat("Pool Share"))
             self.assertTrue(main.cycle_show_pool_share)
+            self.assertTrue(toggle_stat("Total Value ($)"))
+            self.assertTrue(main.cycle_show_total_value)
+            self.assertTrue(toggle_stat("GRC Price ($)"))
+            self.assertTrue(main.cycle_show_price)
 
-            # Disable difficulty, mag, block -> pool share is last remaining
+            # Disable difficulty, mag, block, pool_share, total_value -> price is last remaining
             self.assertTrue(toggle_stat("difficulty"))
             self.assertTrue(toggle_stat("magnitude"))
             self.assertTrue(toggle_stat("block"))
-            self.assertFalse(toggle_stat("pool_share"))
-            self.assertTrue(main.cycle_show_pool_share)
+            self.assertTrue(toggle_stat("pool_share"))
+            self.assertTrue(toggle_stat("total_value"))
+            self.assertFalse(toggle_stat("price"))
+            self.assertTrue(main.cycle_show_price)
 
             # 8. Invalid stat name returns False
             self.assertFalse(toggle_stat("unknown_stat"))
@@ -742,6 +757,8 @@ class TestGridcoinDaemon(unittest.TestCase):
             main.cycle_show_mag = orig_mag
             main.cycle_show_block = orig_block
             main.cycle_show_pool_share = orig_pool_share
+            main.cycle_show_total_value = orig_total_value
+            main.cycle_show_price = orig_price
 
     def test_get_alternating_state_custom_selections(self):
         reward = 50.00
@@ -953,6 +970,66 @@ class TestGridcoinDaemon(unittest.TestCase):
             "Pool Share: 0.05%",
         )
 
+        # 11. Total Value active
+        self.assertEqual(
+            get_alternating_state(
+                0,
+                1,
+                reward,
+                diff,
+                total_value_str="Total Value: $125.50",
+                show_reward=False,
+                show_difficulty=False,
+                show_rac=False,
+                show_total_value=True,
+            ),
+            "Total Value: $125.50",
+        )
+        # Total Value fallback when total_value_str is None
+        self.assertEqual(
+            get_alternating_state(
+                0,
+                1,
+                reward,
+                diff,
+                show_reward=False,
+                show_difficulty=False,
+                show_rac=False,
+                show_total_value=True,
+            ),
+            "Total Value: $0.00",
+        )
+
+        # 12. GRC Price active
+        self.assertEqual(
+            get_alternating_state(
+                0,
+                1,
+                reward,
+                diff,
+                price_str="GRC Price: $0.00870",
+                show_reward=False,
+                show_difficulty=False,
+                show_rac=False,
+                show_price=True,
+            ),
+            "GRC Price: $0.00870",
+        )
+        # GRC Price fallback when price_str is None
+        self.assertEqual(
+            get_alternating_state(
+                0,
+                1,
+                reward,
+                diff,
+                show_reward=False,
+                show_difficulty=False,
+                show_rac=False,
+                show_price=True,
+            ),
+            "GRC Price: N/A",
+        )
+
     def test_trigger_presence_update(self):
         import main
 
@@ -976,6 +1053,8 @@ class TestGridcoinDaemon(unittest.TestCase):
                     ("Total Magnitude", None, lambda s: None, 1027),
                     ("Block Height", None, lambda s: None, 1028),
                     ("Pool Share", None, lambda s: None, 1029),
+                    ("Total Value ($)", None, lambda s: None, 1033),
+                    ("GRC Price ($)", None, lambda s: None, 1034),
                 ],
                 1030,
             ),
@@ -990,6 +1069,8 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(id_map.get("Total Magnitude"), 1027)
         self.assertEqual(id_map.get("Block Height"), 1028)
         self.assertEqual(id_map.get("Pool Share"), 1029)
+        self.assertEqual(id_map.get("Total Value ($)"), 1033)
+        self.assertEqual(id_map.get("GRC Price ($)"), 1034)
         self.assertEqual(id_map.get("Start with Windows"), 1031)
 
         # Test update_tray_menu_checks (Windows)
@@ -1007,8 +1088,8 @@ class TestGridcoinDaemon(unittest.TestCase):
             patch.object(ctypes, "windll", mock_windll, create=True),
         ):
             update_tray_menu_checks(mock_systray)
-            # Should have called CheckMenuItem for Start with Windows, Hide Balance and all 6 stats
-            self.assertEqual(mock_u32.CheckMenuItem.call_count, 8)
+            # Should have called CheckMenuItem for Start with Windows, Hide Balance and all 8 stats
+            self.assertEqual(mock_u32.CheckMenuItem.call_count, 10)
 
         # Test update_tray_menu_checks on non-Windows (should return immediately)
         with patch("sys.platform", "linux"):
@@ -1134,6 +1215,8 @@ class TestGridcoinDaemon(unittest.TestCase):
                 self.assertFalse(first_run["cycle_show_mag"])
                 self.assertFalse(first_run["cycle_show_block"])
                 self.assertFalse(first_run["cycle_show_pool_share"])
+                self.assertFalse(first_run["cycle_show_total_value"])
+                self.assertFalse(first_run["cycle_show_price"])
 
                 # Corrupted file returns defaults
                 with open(tmp_settings, "w", encoding="utf-8") as f:
@@ -1147,8 +1230,10 @@ class TestGridcoinDaemon(unittest.TestCase):
                 self.assertFalse(defaults["cycle_show_mag"])
                 self.assertFalse(defaults["cycle_show_block"])
                 self.assertFalse(defaults["cycle_show_pool_share"])
+                self.assertFalse(defaults["cycle_show_total_value"])
+                self.assertFalse(defaults["cycle_show_price"])
 
-                # File with all 6 stats False enforces at least one True (defaults reward to True)
+                # File with all 8 stats False enforces at least one True (defaults reward to True)
                 with open(tmp_settings, "w", encoding="utf-8") as f:
                     json.dump(
                         {
@@ -1158,6 +1243,8 @@ class TestGridcoinDaemon(unittest.TestCase):
                             "cycle_show_mag": False,
                             "cycle_show_block": False,
                             "cycle_show_pool_share": False,
+                            "cycle_show_total_value": False,
+                            "cycle_show_price": False,
                         },
                         f,
                     )
@@ -1390,6 +1477,86 @@ class TestGridcoinDaemon(unittest.TestCase):
                 parse_args(["--rpc-port", "0"])
             with self.assertRaises(SystemExit):
                 parse_args(["--rpc-port", "70000"])
+
+    def test_format_grc_price(self):
+        self.assertEqual(format_grc_price(None), "GRC Price: N/A")
+        self.assertEqual(format_grc_price(0.0), "GRC Price: N/A")
+        self.assertEqual(format_grc_price(-0.05), "GRC Price: N/A")
+        self.assertEqual(format_grc_price(0.0087123), "GRC Price: $0.00871")
+        self.assertEqual(format_grc_price(1.234567), "GRC Price: $1.23457")
+
+    def test_format_total_value_usd(self):
+        self.assertEqual(format_total_value_usd(0, 0.008), "Total Value: $0.00")
+        self.assertEqual(format_total_value_usd(1000, 0), "Total Value: $0.00")
+        self.assertEqual(format_total_value_usd(1000, None), "Total Value: $0.00")
+        self.assertEqual(format_total_value_usd(-50, 0.008), "Total Value: $0.00")
+        self.assertEqual(format_total_value_usd(50, 0.00871), "Total Value: $0.4355")
+        self.assertEqual(format_total_value_usd(1000, 0.00871), "Total Value: $8.71")
+        self.assertEqual(format_total_value_usd(1000000, 0.00871), "Total Value: $8,710.00")
+
+    def test_get_grc_usd_price_coingecko_and_fallback(self):
+        import main
+
+        main._cached_price = None
+        main._last_price_fetch = 0.0
+
+        # 1. CoinGecko success
+        mock_cg_resp = io.BytesIO(b'{"gridcoin-research": {"usd": 0.00855}}')
+        with patch("urllib.request.urlopen", return_value=mock_cg_resp):
+            price = get_grc_usd_price(timeout=2)
+            self.assertEqual(price, 0.00855)
+
+        # 2. Caching: immediate next call does not touch urlopen
+        with patch("urllib.request.urlopen", side_effect=AssertionError("Should use cache")):
+            self.assertEqual(get_grc_usd_price(), 0.00855)
+
+        # 3. Expire cache: CoinGecko fails, fallback to CoinPaprika
+        main._last_price_fetch = 0.0
+        import urllib.error
+
+        cg_err = urllib.error.URLError("CoinGecko unreachable")
+        mock_cp_resp = io.BytesIO(b'{"quotes": {"USD": {"price": 0.00862}}}')
+
+        def mock_urlopen(req, timeout=5):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if "coingecko" in url:
+                raise cg_err
+            return mock_cp_resp
+
+        with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+            price = get_grc_usd_price(timeout=2)
+            self.assertEqual(price, 0.00862)
+
+        # 4. Both fail, returns cached price if available, or None if no cache
+        main._last_price_fetch = 0.0
+        main._cached_price = None
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Network down")):
+            price = get_grc_usd_price(timeout=2)
+            self.assertIsNone(price)
+
+    def test_get_total_balance(self):
+        mock_grc = MagicMock()
+
+        # 1. getwalletinfo returns balance + immature_balance
+        mock_grc.call.side_effect = lambda cmd: (
+            {"balance": 15000.5, "immature_balance": 500.0} if cmd == "getwalletinfo" else None
+        )
+        self.assertEqual(get_total_balance(mock_grc, active_coins=1000.0), 15500.5)
+
+        # 2. getwalletinfo fails, getbalance succeeds
+        def rpc_side_effect_2(cmd):
+            if cmd == "getwalletinfo":
+                raise RuntimeError("method not found")
+            if cmd == "getbalance":
+                return 12345.67
+            return None
+
+        mock_grc.call.side_effect = rpc_side_effect_2
+        self.assertEqual(get_total_balance(mock_grc, active_coins=1000.0), 12345.67)
+
+        # 3. Both fail, fallback to active_coins
+        mock_grc.call.side_effect = RuntimeError("RPC error")
+        self.assertEqual(get_total_balance(mock_grc, active_coins=7777.0), 7777.0)
 
 
 if __name__ == "__main__":
