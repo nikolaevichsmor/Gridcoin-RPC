@@ -1,3 +1,4 @@
+# Gridcoin-RPC continuous integration test suite
 name: Tests
 
 on:
