@@ -8,6 +8,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -81,6 +82,8 @@ DEFAULT_SETTINGS = {
     "cycle_show_mag": False,
     "cycle_show_block": False,
     "cycle_show_pool_share": False,
+    "cycle_show_total_value": False,
+    "cycle_show_price": False,
 }
 
 
@@ -105,6 +108,8 @@ def load_settings() -> dict:
                     settings["cycle_show_mag"],
                     settings["cycle_show_block"],
                     settings["cycle_show_pool_share"],
+                    settings["cycle_show_total_value"],
+                    settings["cycle_show_price"],
                 ]
                 if not any(active_flags):
                     settings["cycle_show_reward"] = True
@@ -124,6 +129,8 @@ def save_settings() -> bool:
         "cycle_show_mag": cycle_show_mag,
         "cycle_show_block": cycle_show_block,
         "cycle_show_pool_share": cycle_show_pool_share,
+        "cycle_show_total_value": cycle_show_total_value,
+        "cycle_show_price": cycle_show_price,
     }
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -151,6 +158,8 @@ cycle_show_rac: bool = _initial_settings["cycle_show_rac"]
 cycle_show_mag: bool = _initial_settings["cycle_show_mag"]
 cycle_show_block: bool = _initial_settings["cycle_show_block"]
 cycle_show_pool_share: bool = _initial_settings["cycle_show_pool_share"]
+cycle_show_total_value: bool = _initial_settings["cycle_show_total_value"]
+cycle_show_price: bool = _initial_settings["cycle_show_price"]
 update_event = threading.Event()
 
 
@@ -347,7 +356,7 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     parser.add_argument(
         "--version",
         action="version",
-        version="Gridcoin-RPC v1.3.0",
+        version="Gridcoin-RPC v1.2.3",
     )
     parsed = parser.parse_args(argv)
     if parsed.rpc_port is not None and not (1 <= parsed.rpc_port <= 65535):
@@ -699,6 +708,97 @@ def format_pool_share(active_coins: float, net_weight: float) -> str:
     return f"Pool Share: {share:.2f}%"
 
 
+_cached_price: Optional[float] = None
+_last_price_fetch: float = 0.0
+PRICE_CACHE_TTL = 300.0  # 5 minutes in-memory cache
+
+
+def get_grc_usd_price(timeout: int = 5) -> Optional[float]:
+    """Fetch current GRC/USD price with in-memory caching.
+
+    Primary: CoinGecko API.
+    Fallback: CoinPaprika API.
+    """
+    global _cached_price, _last_price_fetch
+    now = time.time()
+    if _cached_price is not None and (now - _last_price_fetch < PRICE_CACHE_TTL):
+        return _cached_price
+
+    # 1. Primary: CoinGecko
+    try:
+        req = urllib.request.Request(
+            "https://api.coingecko.com/api/v3/simple/price?ids=gridcoin-research&vs_currencies=usd",
+            headers={"User-Agent": "Gridcoin-Discord-RPC/1.2.3"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            price = data.get("gridcoin-research", {}).get("usd")
+            if price is not None and float(price) > 0:
+                _cached_price = float(price)
+                _last_price_fetch = now
+                return _cached_price
+    except Exception as err:
+        logger.debug(f"CoinGecko price lookup failed: {err}")
+
+    # 2. Fallback: CoinPaprika
+    try:
+        req = urllib.request.Request(
+            "https://api.coinpaprika.com/v1/tickers/grc-gridcoin",
+            headers={"User-Agent": "Gridcoin-Discord-RPC/1.2.3"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            price = data.get("quotes", {}).get("USD", {}).get("price")
+            if price is not None and float(price) > 0:
+                _cached_price = float(price)
+                _last_price_fetch = now
+                return _cached_price
+    except Exception as err:
+        logger.debug(f"CoinPaprika price lookup failed: {err}")
+
+    return _cached_price
+
+
+def get_total_balance(grc: GridcoinRPC, active_coins: float = 0.0) -> float:
+    """Fetch total coin balance from Gridcoin node via getwalletinfo or getbalance."""
+    try:
+        info = grc.call("getwalletinfo")
+        if isinstance(info, dict) and "balance" in info:
+            balance = float(info["balance"])
+            immature = float(info.get("immature_balance", 0.0))
+            return max(balance + immature, 0.0)
+    except Exception:
+        pass
+
+    try:
+        bal = grc.call("getbalance")
+        if isinstance(bal, (int, float)):
+            return max(float(bal), 0.0)
+    except Exception:
+        pass
+
+    return max(active_coins, 0.0)
+
+
+def format_total_value_usd(total_coins: float, price_usd: Optional[float]) -> str:
+    """Format total holding value in USD."""
+    if price_usd is None or price_usd <= 0 or total_coins <= 0:
+        return "Total Value: $0.00"
+    val = total_coins * price_usd
+    if val >= 1000:
+        return f"Total Value: ${val:,.2f}"
+    if val >= 1:
+        return f"Total Value: ${val:.2f}"
+    return f"Total Value: ${val:.4f}"
+
+
+def format_grc_price(price_usd: Optional[float]) -> str:
+    """Format current GRC market price in USD."""
+    if price_usd is None or price_usd <= 0:
+        return "GRC Price: N/A"
+    return f"GRC Price: ${price_usd:.5f}"
+
+
 def get_alternating_state(
     cycle: int,
     switch_cycles: int,
@@ -708,12 +808,16 @@ def get_alternating_state(
     total_mag: Optional[float] = None,
     block_height: Optional[int] = None,
     pool_share_str: Optional[str] = None,
+    total_value_str: Optional[str] = None,
+    price_str: Optional[str] = None,
     show_reward: bool = True,
     show_difficulty: bool = True,
     show_rac: bool = True,
     show_mag: bool = False,
     show_block: bool = False,
     show_pool_share: bool = False,
+    show_total_value: bool = False,
+    show_price: bool = False,
 ) -> str:
     """Alternate between active display metrics every switch_cycles update cycles."""
     candidates = []
@@ -729,6 +833,10 @@ def get_alternating_state(
         candidates.append(format_block_height(block_height))
     if show_pool_share and pool_share_str:
         candidates.append(pool_share_str)
+    if show_total_value:
+        candidates.append(total_value_str if total_value_str is not None else "Total Value: $0.00")
+    if show_price:
+        candidates.append(price_str if price_str is not None else "GRC Price: N/A")
 
     if not candidates:
         if show_rac:
@@ -737,6 +845,10 @@ def get_alternating_state(
             candidates.append("Block: Unknown")
         elif show_pool_share:
             candidates.append("Pool Share: 0.00%")
+        elif show_total_value:
+            candidates.append("Total Value: $0.00")
+        elif show_price:
+            candidates.append("GRC Price: N/A")
         elif show_mag:
             candidates.append("Magnitude: None")
         elif show_difficulty:
@@ -781,6 +893,7 @@ def toggle_stat(stat_name: str) -> bool:
     """
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
+    global cycle_show_total_value, cycle_show_price
 
     active_count = sum(
         [
@@ -790,6 +903,8 @@ def toggle_stat(stat_name: str) -> bool:
             cycle_show_mag,
             cycle_show_block,
             cycle_show_pool_share,
+            cycle_show_total_value,
+            cycle_show_price,
         ]
     )
     toggled = False
@@ -843,6 +958,20 @@ def toggle_stat(stat_name: str) -> bool:
             return False
         cycle_show_pool_share = not cycle_show_pool_share
         logger.info(f"Toggled Pool Share: {cycle_show_pool_share}")
+        toggled = True
+    elif stat_name in ("total_value", "value", "Total Value ($)", "Total Value (USD)", "Total Value"):
+        if cycle_show_total_value and active_count <= 1:
+            logger.info("Cannot disable Total Value: at least one display stat must remain active.")
+            return False
+        cycle_show_total_value = not cycle_show_total_value
+        logger.info(f"Toggled Total Value: {cycle_show_total_value}")
+        toggled = True
+    elif stat_name in ("price", "grc_price", "GRC Price ($)", "GRC Price (USD)", "GRC Price"):
+        if cycle_show_price and active_count <= 1:
+            logger.info("Cannot disable GRC Price: at least one display stat must remain active.")
+            return False
+        cycle_show_price = not cycle_show_price
+        logger.info(f"Toggled GRC Price: {cycle_show_price}")
         toggled = True
 
     if toggled:
@@ -905,6 +1034,8 @@ def update_tray_menu_checks(systray) -> None:
         "Total Magnitude": cycle_show_mag,
         "Block Height": cycle_show_block,
         "Pool Share": cycle_show_pool_share,
+        "Total Value ($)": cycle_show_total_value,
+        "GRC Price ($)": cycle_show_price,
     }
     for name, is_active in stat_flags.items():
         if name in id_map:
@@ -1080,6 +1211,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     global running, presence_enabled, hide_balance
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
+    global cycle_show_total_value, cycle_show_price
 
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
@@ -1141,6 +1273,16 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
             if total_mag is None:
                 total_mag = get_total_magnitude(None, mining_info)
 
+            total_value_str = None
+            price_str = None
+            if cycle_show_total_value or cycle_show_price:
+                price_usd = get_grc_usd_price()
+                if cycle_show_price:
+                    price_str = format_grc_price(price_usd)
+                if cycle_show_total_value:
+                    total_balance = get_total_balance(grc, active_coins)
+                    total_value_str = format_total_value_usd(total_balance, price_usd)
+
             # 2. Alternating State (cycles between all active metrics)
             state_str = get_alternating_state(
                 cycle_count,
@@ -1151,12 +1293,16 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 total_mag=total_mag,
                 block_height=block_height,
                 pool_share_str=pool_share_str,
+                total_value_str=total_value_str,
+                price_str=price_str,
                 show_reward=cycle_show_reward,
                 show_difficulty=cycle_show_difficulty,
                 show_rac=cycle_show_rac,
                 show_mag=cycle_show_mag,
                 show_block=cycle_show_block,
                 show_pool_share=cycle_show_pool_share,
+                show_total_value=cycle_show_total_value,
+                show_price=cycle_show_price,
             )
             cycle_count += 1
 
@@ -1344,6 +1490,16 @@ def main(argv: Optional[list] = None):
             trigger_presence_update()
         update_tray_menu_checks(systray)
 
+    def on_toggle_total_value(systray):
+        if toggle_stat("total_value"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
+    def on_toggle_price(systray):
+        if toggle_stat("price"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
     def on_tray_autostart(systray):
         new_state = not is_autostart_enabled()
         if set_autostart(new_state):
@@ -1376,6 +1532,8 @@ def main(argv: Optional[list] = None):
                 ("Total Magnitude", None, on_toggle_mag),
                 ("Block Height", None, on_toggle_block),
                 ("Pool Share", None, on_toggle_pool_share),
+                ("Total Value ($)", None, on_toggle_total_value),
+                ("GRC Price ($)", None, on_toggle_price),
             )
             menu_options = (
                 ("Turn Off / On Presence", None, on_tray_toggle),
