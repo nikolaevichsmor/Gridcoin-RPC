@@ -1,6 +1,6 @@
 # Gridcoin Discord Rich Presence
 
-A lightweight daemon and portable utility that displays your live Gridcoin staking status, estimated pending reward, network difficulty, top BOINC project RAC, total magnitude, block height, pool share, and time since last stake directly on your Discord profile.
+A lightweight daemon and portable utility that displays your live Gridcoin staking status, estimated pending reward, network difficulty, top BOINC project RAC, total magnitude, block height, pool share, total portfolio USD valuation, real-time market price, and time since last stake directly on your Discord profile.
 
 [![Tests](https://github.com/nikolaevichsmor/Gridcoin-RPC/actions/workflows/tests.yml/badge.svg)](https://github.com/nikolaevichsmor/Gridcoin-RPC/actions/workflows/tests.yml)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -27,13 +27,15 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 - **Smart Staking Status (Line 1)**: Displays your active staking status. By default, **Privacy Mode (`Hide Balance`)** is enabled, displaying `Staking ********* GRC` (or `Not Staking ********* GRC` / `Staking: Inactive` if locked) without revealing your coin holdings. When Privacy Mode is unticked in the tray, it displays your exact active staking coin balance with thousands separators (e.g. `Staking: 59,468.15 GRC`).
 - **Configurable Rotating Stats (Line 2)**:
   - **First-Run Default**: On first launch, **only 1 checkbox is enabled by default** — **Estimated Reward**.
-  - Users can enable any combination of the 6 available metrics via the system tray submenu:
+  - Users can enable any combination of the 8 available metrics via the system tray submenu:
     1. **Estimated Reward**: Pending BOINC research reward (`Est. Reward: 1,304.02 GRC`) or Proof-of-Stake hunt status (**`Searching for Blocks`** if pending reward is 0 / investor mode).
     2. **Difficulty**: Current network difficulty (`Difficulty: 12.34`).
     3. **Top Project RAC**: Top contributing BOINC project by Recent Average Credit (`odlk1 RAC: 38,426`).
     4. **Total Magnitude**: Total BOINC magnitude across projects (`Magnitude: 142.50` or `Magnitude: 100`).
     5. **Block Height**: Current network block count (`Block: #3,201,400`).
     6. **Pool Share**: Percentage of current active staking coins relative to total network stake weight (`Pool Share: 0.05%`, or up to 4 decimal places for smaller stakes e.g. `Pool Share: 0.0042%`).
+    7. **Total Value ($)**: Real-time estimated valuation of your entire coin balance in USD calculated via live market price (`Total Value: $485.20`). *Note: Displays your holdings value when checked even if Privacy Mode (`Hide Balance`) is active on Line 1.*
+    8. **GRC Price ($)**: Real-time GRC market price in USD queried live from CoinGecko with automatic CoinPaprika fallback (`GRC Price: $0.00591`).
   - When multiple metrics are enabled, the display smoothly alternates between them every N update cycles (configurable via `SWITCH_CYCLES`).
   - **Constraint Guard**: At least one metric must always remain active (the app prevents unchecking the last remaining active metric).
 - **Elapsed Timer**: Live timer counting up from your last confirmed stake transaction.
@@ -48,7 +50,7 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 
 The easiest way to run the daemon on Windows:
 
-1. Download **`Gridcoin-RPC-v1.2.2-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.2.3-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Unzip the archive to any folder.
 3. Make sure your Gridcoin wallet is open.
 4. Launch `Gridcoin-RPC.exe`.
@@ -66,6 +68,8 @@ Right-click the Gridcoin icon in your tray to:
   - [ ] **Total Magnitude**
   - [ ] **Block Height**
   - [ ] **Pool Share**
+  - [ ] **Total Value ($)**
+  - [ ] **GRC Price ($)**
   *(Applies immediately to Discord and automatically persists in `settings.json`; at least one stat must remain active)*.
 - **Start with Windows**: Toggle automatic startup on Windows boot (safely manages `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
 - **What is Gridcoin? (Website)**: Open gridcoin.us in your browser.
@@ -78,7 +82,7 @@ Right-click the Gridcoin icon in your tray to:
 
 For Linux (x86_64), no Python installation is required:
 
-1. Download **`Gridcoin-RPC-v1.2.2-linux-x86_64.tar.gz`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.2.3-linux-x86_64.tar.gz`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Extract and run:
    ```bash
    tar -xzvf Gridcoin-RPC-*-linux-x86_64.tar.gz
