@@ -48,7 +48,7 @@ A lightweight daemon and portable utility that displays your live Gridcoin staki
 
 The easiest way to run the daemon on Windows:
 
-1. Download **`Gridcoin-RPC-v1.2.1-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.2.2-win64.zip`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Unzip the archive to any folder.
 3. Make sure your Gridcoin wallet is open.
 4. Launch `Gridcoin-RPC.exe`.
@@ -78,7 +78,7 @@ Right-click the Gridcoin icon in your tray to:
 
 For Linux (x86_64), no Python installation is required:
 
-1. Download **`Gridcoin-RPC-v1.2.1-linux-x86_64.tar.gz`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
+1. Download **`Gridcoin-RPC-v1.2.2-linux-x86_64.tar.gz`** from [Releases](https://github.com/nikolaevichsmor/Gridcoin-RPC/releases).
 2. Extract and run:
    ```bash
    tar -xzvf Gridcoin-RPC-*-linux-x86_64.tar.gz
@@ -86,6 +86,26 @@ For Linux (x86_64), no Python installation is required:
    ./Gridcoin-RPC
    ```
 It automatically finds `~/.GridcoinResearch/gridcoinresearch.conf`, runs headlessly as a background daemon, and supports graceful shutdown via `SIGTERM` / `SIGINT`.
+
+### Running as a systemd User Service
+
+To run Gridcoin-RPC automatically in the background on Linux without a GUI:
+
+1. Copy the service file to your systemd user directory:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp scripts/gridcoin-rpc.service ~/.config/systemd/user/
+   ```
+2. Enable and start the service:
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now gridcoin-rpc
+   ```
+3. Check status or monitor logs:
+   ```bash
+   systemctl --user status gridcoin-rpc
+   journalctl --user -u gridcoin-rpc -f
+   ```
 
 ---
 
@@ -141,6 +161,42 @@ Available variables:
 | `DISCORD_LARGE_TEXT` | Tooltip for large profile image | `Gridcoin Network` |
 | `DISCORD_SMALL_IMAGE_STAKING` | Badge asset key when staking is active | `staking` |
 | `DISCORD_SMALL_IMAGE_OFFLINE` | Badge asset key when wallet is locked or offline | `offline` |
+
+### CLI Options
+
+You can pass command-line arguments to override configurations or run headlessly:
+
+| Option | Description |
+| :--- | :--- |
+| `--headless` | Run in headless mode without system tray / GUI (ideal for Linux systemd services) |
+| `--rpc-host HOST` | Remote Gridcoin RPC host IP or domain |
+| `--rpc-port PORT` | Remote Gridcoin RPC port |
+| `--rpc-user USER` | Remote Gridcoin RPC username |
+| `--rpc-password PASS` | Remote Gridcoin RPC password |
+| `--version` | Display version information |
+
+### Remote Node Setup (NAS / Raspberry Pi / Home Server)
+
+If your Gridcoin daemon (`gridcoinresearchd`) runs on a remote server/NAS and Discord is on your local computer, you can configure the remote connection in any of the following ways (in order of precedence):
+
+1. **CLI Flags**: `python main.py --headless --rpc-host 192.168.1.50 --rpc-port 15715 --rpc-user grcrpc --rpc-password secret`
+2. **Environment (`.env`)**:
+   ```env
+   RPC_HOST=192.168.1.50
+   RPC_PORT=15715
+   RPC_USER=grcrpc
+   RPC_PASSWORD=secret
+   ```
+3. **`settings.json`**:
+   ```json
+   {
+     "rpc_host": "192.168.1.50",
+     "rpc_port": 15715,
+     "rpc_user": "grcrpc",
+     "rpc_password": "secret"
+   }
+   ```
+If the local `%AppData%` or `~/.GridcoinResearch` directory is empty or absent, Gridcoin-RPC seamlessly uses your configured remote credentials without error.
 
 ---
 
