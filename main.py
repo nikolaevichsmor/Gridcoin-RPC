@@ -1,21 +1,21 @@
+import argparse
+import ctypes
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import os
-from pathlib import Path
 import signal
 import socket
 import sys
 import threading
 import time
+import webbrowser
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
 from pypresence import Presence
-from pypresence.exceptions import DiscordError, DiscordNotFound, PipeClosed
 
-import ctypes
-import webbrowser
 from rpc_client import GridcoinRPC
 
 # infi.systray dereferences ctypes.windll at import time, so it can only be
@@ -94,6 +94,9 @@ def load_settings() -> dict:
             if isinstance(data, dict):
                 for k in DEFAULT_SETTINGS:
                     if k in data and isinstance(data[k], bool):
+                        settings[k] = data[k]
+                for k in ("rpc_host", "rpc_port", "rpc_user", "rpc_password"):
+                    if k in data and data[k] is not None:
                         settings[k] = data[k]
                 active_flags = [
                     settings["cycle_show_reward"],
@@ -181,6 +184,7 @@ def is_autostart_enabled() -> bool:
         return False
     try:
         import winreg
+
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY, 0, winreg.KEY_READ) as key:
             val, _ = winreg.QueryValueEx(key, AUTOSTART_APP_NAME)
             return bool(val)
@@ -194,7 +198,10 @@ def set_autostart(enable: bool) -> bool:
         return False
     try:
         import winreg
-        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY, 0, winreg.KEY_SET_VALUE) as key:
+
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY, 0, winreg.KEY_SET_VALUE
+        ) as key:
             if enable:
                 exe_path = get_executable_path()
                 winreg.SetValueEx(key, AUTOSTART_APP_NAME, 0, winreg.REG_SZ, exe_path)
@@ -241,7 +248,13 @@ def find_gridcoin_conf() -> Optional[Path]:
             if conf.is_file():
                 return conf
     elif sys.platform == "darwin":
-        conf = Path.home() / "Library" / "Application Support" / "GridcoinResearch" / "gridcoinresearch.conf"
+        conf = (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "GridcoinResearch"
+            / "gridcoinresearch.conf"
+        )
         if conf.is_file():
             return conf
     else:
@@ -258,6 +271,14 @@ def auto_detect_rpc_credentials():
         return
     conf_path = find_gridcoin_conf()
     if not conf_path:
+        if RPC_HOST not in ("127.0.0.1", "localhost"):
+            logger.info(
+                f"Local gridcoinresearch.conf not found. Using remote node at {RPC_HOST}:{RPC_PORT}"
+            )
+        else:
+            logger.info(
+                "Local gridcoinresearch.conf not found. Using configured/default RPC settings."
+            )
         return
     try:
         with open(conf_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -285,6 +306,103 @@ def auto_detect_rpc_credentials():
         logger.info(f"Auto-detected RPC credentials from {conf_path}")
     except Exception as e:
         logger.warning(f"Failed reading {conf_path}: {e}")
+
+
+def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Gridcoin Discord Rich Presence Daemon")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without GUI / system tray (recommended for Linux systemd services)",
+    )
+    parser.add_argument(
+        "--rpc-host",
+        dest="rpc_host",
+        type=str,
+        default=None,
+        help="Gridcoin node RPC host/IP (overrides config and auto-detection)",
+    )
+    parser.add_argument(
+        "--rpc-port",
+        dest="rpc_port",
+        type=int,
+        default=None,
+        help="Gridcoin node RPC port (overrides config and auto-detection)",
+    )
+    parser.add_argument(
+        "--rpc-user",
+        dest="rpc_user",
+        type=str,
+        default=None,
+        help="Gridcoin node RPC username",
+    )
+    parser.add_argument(
+        "--rpc-password",
+        dest="rpc_password",
+        type=str,
+        default=None,
+        help="Gridcoin node RPC password",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="Gridcoin-RPC v1.3.0",
+    )
+    parsed = parser.parse_args(argv)
+    if parsed.rpc_port is not None and not (1 <= parsed.rpc_port <= 65535):
+        parser.error(f"--rpc-port must be between 1 and 65535, got {parsed.rpc_port}")
+    return parsed
+
+
+def apply_rpc_config(args: Optional[argparse.Namespace] = None):
+    """Apply RPC configuration cascading: settings.json -> environment (.env) -> auto-detection -> CLI args."""
+    global RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS
+    settings = load_settings()
+
+    # 1. settings.json
+    if "rpc_host" in settings and settings["rpc_host"]:
+        RPC_HOST = str(settings["rpc_host"])
+    if "rpc_port" in settings and settings["rpc_port"] is not None:
+        try:
+            RPC_PORT = int(settings["rpc_port"])
+        except (ValueError, TypeError):
+            pass
+    if "rpc_user" in settings and settings["rpc_user"]:
+        RPC_USER = str(settings["rpc_user"])
+    if "rpc_password" in settings and settings["rpc_password"]:
+        RPC_PASS = str(settings["rpc_password"])
+
+    # 2. Environment variables (.env has already been loaded)
+    env_host = os.getenv("RPC_HOST") or os.getenv("rpc_host")
+    if env_host:
+        RPC_HOST = env_host
+    env_port = os.getenv("RPC_PORT") or os.getenv("rpc_port")
+    if env_port:
+        try:
+            RPC_PORT = int(env_port)
+        except (ValueError, TypeError):
+            pass
+    env_user = os.getenv("RPC_USER") or os.getenv("rpc_user")
+    if env_user:
+        RPC_USER = env_user
+    env_pass = os.getenv("RPC_PASSWORD") or os.getenv("rpc_password")
+    if env_pass:
+        RPC_PASS = env_pass
+
+    # 3. Auto-detect from local conf (if user/pass not set)
+    auto_detect_rpc_credentials()
+
+    # 4. CLI arguments (highest priority)
+    if args:
+        if getattr(args, "rpc_host", None):
+            RPC_HOST = args.rpc_host
+        if getattr(args, "rpc_port", None) is not None:
+            RPC_PORT = args.rpc_port
+        if getattr(args, "rpc_user", None):
+            RPC_USER = args.rpc_user
+        if getattr(args, "rpc_password", None):
+            RPC_PASS = args.rpc_password
 
 
 def get_presence_buttons() -> Optional[list]:
@@ -481,7 +599,9 @@ def format_magnitude(raw_mag: Any) -> str:
         return f"Magnitude: {raw_mag}"
 
 
-def get_total_magnitude(explain_magnitude_data: Any = None, mining_info: Any = None) -> Optional[float]:
+def get_total_magnitude(
+    explain_magnitude_data: Any = None, mining_info: Any = None
+) -> Optional[float]:
     """Extract total BOINC magnitude from explainmagnitude or getmininginfo."""
     if isinstance(explain_magnitude_data, list):
         for item in explain_magnitude_data:
@@ -662,19 +782,23 @@ def toggle_stat(stat_name: str) -> bool:
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
 
-    active_count = sum([
-        cycle_show_reward,
-        cycle_show_difficulty,
-        cycle_show_rac,
-        cycle_show_mag,
-        cycle_show_block,
-        cycle_show_pool_share,
-    ])
+    active_count = sum(
+        [
+            cycle_show_reward,
+            cycle_show_difficulty,
+            cycle_show_rac,
+            cycle_show_mag,
+            cycle_show_block,
+            cycle_show_pool_share,
+        ]
+    )
     toggled = False
 
     if stat_name in ("reward", "Estimated Reward"):
         if cycle_show_reward and active_count <= 1:
-            logger.info("Cannot disable Estimated Reward: at least one display stat must remain active.")
+            logger.info(
+                "Cannot disable Estimated Reward: at least one display stat must remain active."
+            )
             return False
         cycle_show_reward = not cycle_show_reward
         logger.info(f"Toggled Estimated Reward: {cycle_show_reward}")
@@ -688,21 +812,27 @@ def toggle_stat(stat_name: str) -> bool:
         toggled = True
     elif stat_name in ("rac", "Top Project RAC"):
         if cycle_show_rac and active_count <= 1:
-            logger.info("Cannot disable Top Project RAC: at least one display stat must remain active.")
+            logger.info(
+                "Cannot disable Top Project RAC: at least one display stat must remain active."
+            )
             return False
         cycle_show_rac = not cycle_show_rac
         logger.info(f"Toggled Top Project RAC: {cycle_show_rac}")
         toggled = True
     elif stat_name in ("mag", "magnitude", "Total Magnitude", "Magnitude"):
         if cycle_show_mag and active_count <= 1:
-            logger.info("Cannot disable Total Magnitude: at least one display stat must remain active.")
+            logger.info(
+                "Cannot disable Total Magnitude: at least one display stat must remain active."
+            )
             return False
         cycle_show_mag = not cycle_show_mag
         logger.info(f"Toggled Total Magnitude: {cycle_show_mag}")
         toggled = True
     elif stat_name in ("block", "Block Height", "Block Number"):
         if cycle_show_block and active_count <= 1:
-            logger.info("Cannot disable Block Height: at least one display stat must remain active.")
+            logger.info(
+                "Cannot disable Block Height: at least one display stat must remain active."
+            )
             return False
         cycle_show_block = not cycle_show_block
         logger.info(f"Toggled Block Height: {cycle_show_block}")
@@ -898,7 +1028,7 @@ class DiscordPresenceManager:
             self.connected = True
             logger.info("Successfully connected to Discord IPC.")
             return True
-        except (DiscordNotFound, DiscordError, ConnectionRefusedError, FileNotFoundError, Exception) as err:
+        except Exception as err:
             self.connected = False
             self.rpc = None
             logger.warning(f"Discord IPC unavailable: {err}. Retrying in background...")
@@ -911,7 +1041,7 @@ class DiscordPresenceManager:
         try:
             self.rpc.update(**kwargs)
             return True
-        except (PipeClosed, DiscordError, BrokenPipeError, ConnectionResetError, Exception) as err:
+        except Exception as err:
             logger.warning(f"Discord IPC disconnected during update: {err}. Resetting connection.")
             self.connected = False
             try:
@@ -993,7 +1123,9 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
 
             pool_share_str = format_pool_share(active_coins, net_weight)
 
-            details_str = format_details(active_coins, is_staking=is_staking, hide_balance=hide_balance)
+            details_str = format_details(
+                active_coins, is_staking=is_staking, hide_balance=hide_balance
+            )
 
             # Check for top BOINC project RAC and total magnitude periodically
             current_time = time.time()
@@ -1070,6 +1202,22 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                     f"Last Stake: {last_stake_time}"
                 )
 
+        except PermissionError as auth_err:
+            if presence_enabled:
+                logger.error(
+                    f"RPC authentication failed: {auth_err}. Please verify rpc_user and rpc_password."
+                )
+                offline_payload = {
+                    "details": "RPC Auth Failed",
+                    "state": "Check Credentials",
+                }
+                buttons = get_presence_buttons()
+                if buttons:
+                    offline_payload["buttons"] = buttons
+                assets = get_presence_assets(is_offline=True)
+                if assets:
+                    offline_payload.update(assets)
+                discord.update(**offline_payload)
         except ConnectionError as rpc_err:
             if presence_enabled:
                 logger.warning(f"Gridcoin wallet unreachable ({rpc_err}). Setting offline status.")
@@ -1096,15 +1244,31 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
         update_event.clear()
 
 
-def main():
+def main(argv: Optional[list] = None):
     global discord_mgr, presence_enabled, running
+    args = parse_args(argv)
 
     if not acquire_single_instance_lock():
         logger.warning("Another instance of Gridcoin-RPC is already running. Exiting.")
         sys.exit(0)
 
-    logger.info("Starting Gridcoin Discord Rich Presence daemon...")
-    auto_detect_rpc_credentials()
+    def handle_shutdown_signal(signum, frame):
+        global running
+        sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+        logger.info(f"Received signal {sig_name}, shutting down...")
+        running = False
+        trigger_presence_update()
+
+    try:
+        signal.signal(signal.SIGINT, handle_shutdown_signal)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, handle_shutdown_signal)
+    except (ValueError, OSError) as e:
+        logger.debug(f"Could not register signal handlers: {e}")
+
+    mode_str = " (headless)" if args.headless else ""
+    logger.info(f"Starting Gridcoin Discord Rich Presence daemon{mode_str}...")
+    apply_rpc_config(args)
     logger.info(f"Target node: {RPC_HOST}:{RPC_PORT}, update interval: {POLL_INTERVAL}s")
 
     grc = GridcoinRPC(RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS)
@@ -1202,7 +1366,7 @@ def main():
             discord_mgr.close()
 
     tray = None
-    if sys.platform == "win32":
+    if not args.headless and sys.platform == "win32":
         icon_path = get_icon_file_path()
         if icon_path:
             cycle_suboptions = (
@@ -1222,7 +1386,9 @@ def main():
                 ("GitHub Repository", None, on_tray_github),
             )
             try:
-                tray = SysTrayIcon(icon_path, "Gridcoin Discord RPC", menu_options, on_quit=on_tray_quit)
+                tray = SysTrayIcon(
+                    icon_path, "Gridcoin Discord RPC", menu_options, on_quit=on_tray_quit
+                )
 
                 original_create_menu = tray._create_menu
 
@@ -1238,6 +1404,7 @@ def main():
                 def patched_show_menu():
                     if tray._menu is None:
                         from infi.systray.win32_adapter import CreatePopupMenu
+
                         tray._menu = CreatePopupMenu()
                         tray._create_menu(tray._menu, tray._menu_options)
                     update_tray_menu_checks(tray)
@@ -1253,6 +1420,8 @@ def main():
         while running:
             time.sleep(1)
     finally:
+        if discord_mgr:
+            discord_mgr.close()
         if tray:
             try:
                 tray.shutdown()
