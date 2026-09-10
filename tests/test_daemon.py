@@ -21,12 +21,15 @@ from main import (
     format_difficulty,
     format_grc_price,
     format_magnitude,
+    format_peers,
     format_pool_share,
     format_reward,
+    format_sync_details,
     format_total_value_usd,
     get_active_staking_coins,
     get_alternating_state,
     get_block_height,
+    get_blockchain_sync_status,
     get_difficulty,
     get_executable_path,
     get_expected_reward,
@@ -34,6 +37,7 @@ from main import (
     get_last_stake_timestamp,
     get_network_stake_weight,
     get_newest_txid,
+    get_peer_count,
     get_presence_assets,
     get_presence_buttons,
     get_top_project_rac,
@@ -689,6 +693,7 @@ class TestGridcoinDaemon(unittest.TestCase):
         orig_pool_share = main.cycle_show_pool_share
         orig_total_value = main.cycle_show_total_value
         orig_price = main.cycle_show_price
+        orig_peers = main.cycle_show_peers
 
         try:
             main.cycle_show_reward = True
@@ -699,6 +704,7 @@ class TestGridcoinDaemon(unittest.TestCase):
             main.cycle_show_pool_share = False
             main.cycle_show_total_value = False
             main.cycle_show_price = False
+            main.cycle_show_peers = False
 
             # 1. Toggle reward off -> succeeds
             self.assertTrue(toggle_stat("reward"))
@@ -738,15 +744,18 @@ class TestGridcoinDaemon(unittest.TestCase):
             self.assertTrue(main.cycle_show_total_value)
             self.assertTrue(toggle_stat("GRC Price ($)"))
             self.assertTrue(main.cycle_show_price)
+            self.assertTrue(toggle_stat("Network Peers"))
+            self.assertTrue(main.cycle_show_peers)
 
-            # Disable difficulty, mag, block, pool_share, total_value -> price is last remaining
+            # Disable difficulty, mag, block, pool_share, total_value, price -> peers is last remaining
             self.assertTrue(toggle_stat("difficulty"))
             self.assertTrue(toggle_stat("magnitude"))
             self.assertTrue(toggle_stat("block"))
             self.assertTrue(toggle_stat("pool_share"))
             self.assertTrue(toggle_stat("total_value"))
-            self.assertFalse(toggle_stat("price"))
-            self.assertTrue(main.cycle_show_price)
+            self.assertTrue(toggle_stat("price"))
+            self.assertFalse(toggle_stat("peers"))
+            self.assertTrue(main.cycle_show_peers)
 
             # 8. Invalid stat name returns False
             self.assertFalse(toggle_stat("unknown_stat"))
@@ -759,6 +768,7 @@ class TestGridcoinDaemon(unittest.TestCase):
             main.cycle_show_pool_share = orig_pool_share
             main.cycle_show_total_value = orig_total_value
             main.cycle_show_price = orig_price
+            main.cycle_show_peers = orig_peers
 
     def test_get_alternating_state_custom_selections(self):
         reward = 50.00
@@ -1030,6 +1040,36 @@ class TestGridcoinDaemon(unittest.TestCase):
             "GRC Price: N/A",
         )
 
+        # 13. Network Peers active
+        self.assertEqual(
+            get_alternating_state(
+                0,
+                1,
+                reward,
+                diff,
+                peers_str="Peers: 18",
+                show_reward=False,
+                show_difficulty=False,
+                show_rac=False,
+                show_peers=True,
+            ),
+            "Peers: 18",
+        )
+        # Peers fallback when peers_str is None
+        self.assertEqual(
+            get_alternating_state(
+                0,
+                1,
+                reward,
+                diff,
+                show_reward=False,
+                show_difficulty=False,
+                show_rac=False,
+                show_peers=True,
+            ),
+            "Peers: 0",
+        )
+
     def test_trigger_presence_update(self):
         import main
 
@@ -1055,6 +1095,7 @@ class TestGridcoinDaemon(unittest.TestCase):
                     ("Pool Share", None, lambda s: None, 1029),
                     ("Total Value ($)", None, lambda s: None, 1033),
                     ("GRC Price ($)", None, lambda s: None, 1034),
+                    ("Network Peers", None, lambda s: None, 1035),
                 ],
                 1030,
             ),
@@ -1071,6 +1112,7 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(id_map.get("Pool Share"), 1029)
         self.assertEqual(id_map.get("Total Value ($)"), 1033)
         self.assertEqual(id_map.get("GRC Price ($)"), 1034)
+        self.assertEqual(id_map.get("Network Peers"), 1035)
         self.assertEqual(id_map.get("Start with Windows"), 1031)
 
         # Test update_tray_menu_checks (Windows)
@@ -1088,8 +1130,8 @@ class TestGridcoinDaemon(unittest.TestCase):
             patch.object(ctypes, "windll", mock_windll, create=True),
         ):
             update_tray_menu_checks(mock_systray)
-            # Should have called CheckMenuItem for Start with Windows, Hide Balance and all 8 stats
-            self.assertEqual(mock_u32.CheckMenuItem.call_count, 10)
+            # Should have called CheckMenuItem for Start with Windows, Hide Balance and all 9 stats
+            self.assertEqual(mock_u32.CheckMenuItem.call_count, 11)
 
         # Test update_tray_menu_checks on non-Windows (should return immediately)
         with patch("sys.platform", "linux"):
@@ -1217,6 +1259,7 @@ class TestGridcoinDaemon(unittest.TestCase):
                 self.assertFalse(first_run["cycle_show_pool_share"])
                 self.assertFalse(first_run["cycle_show_total_value"])
                 self.assertFalse(first_run["cycle_show_price"])
+                self.assertFalse(first_run["cycle_show_peers"])
 
                 # Corrupted file returns defaults
                 with open(tmp_settings, "w", encoding="utf-8") as f:
@@ -1232,8 +1275,9 @@ class TestGridcoinDaemon(unittest.TestCase):
                 self.assertFalse(defaults["cycle_show_pool_share"])
                 self.assertFalse(defaults["cycle_show_total_value"])
                 self.assertFalse(defaults["cycle_show_price"])
+                self.assertFalse(defaults["cycle_show_peers"])
 
-                # File with all 8 stats False enforces at least one True (defaults reward to True)
+                # File with all 9 stats False enforces at least one True (defaults reward to True)
                 with open(tmp_settings, "w", encoding="utf-8") as f:
                     json.dump(
                         {
@@ -1245,6 +1289,7 @@ class TestGridcoinDaemon(unittest.TestCase):
                             "cycle_show_pool_share": False,
                             "cycle_show_total_value": False,
                             "cycle_show_price": False,
+                            "cycle_show_peers": False,
                         },
                         f,
                     )
@@ -1557,6 +1602,98 @@ class TestGridcoinDaemon(unittest.TestCase):
         # 3. Both fail, fallback to active_coins
         mock_grc.call.side_effect = RuntimeError("RPC error")
         self.assertEqual(get_total_balance(mock_grc, active_coins=7777.0), 7777.0)
+
+    def test_get_blockchain_sync_status(self):
+        # 1. Initial block download active
+        syncing, prog = get_blockchain_sync_status({
+            "initialblockdownload": True,
+            "verificationprogress": 0.456,
+        })
+        self.assertTrue(syncing)
+        self.assertAlmostEqual(prog, 0.456)
+
+        # 2. Behind network (verificationprogress < 0.9995 and headers > blocks + 5)
+        syncing, prog = get_blockchain_sync_status({
+            "initialblockdownload": False,
+            "verificationprogress": 0.985,
+            "blocks": 3200000,
+            "headers": 3201400,
+        })
+        self.assertTrue(syncing)
+        self.assertAlmostEqual(prog, 0.985)
+
+        # 3. Fully synced
+        syncing, prog = get_blockchain_sync_status({
+            "initialblockdownload": False,
+            "verificationprogress": 0.99999,
+            "blocks": 3201400,
+            "headers": 3201400,
+        })
+        self.assertFalse(syncing)
+        self.assertAlmostEqual(prog, 1.0)
+
+        # 4. Fallback headers vs blocks when verificationprogress is missing
+        syncing, prog = get_blockchain_sync_status({
+            "blocks": 1000,
+            "headers": 2000,
+        })
+        self.assertTrue(syncing)
+        self.assertAlmostEqual(prog, 0.5)
+
+        # 5. Invalid or empty input
+        self.assertEqual(get_blockchain_sync_status({}), (False, 1.0))
+        self.assertEqual(get_blockchain_sync_status(None), (False, 1.0))
+
+    def test_format_sync_details(self):
+        self.assertEqual(format_sync_details(0.9845), "Syncing: 98.5%")
+        self.assertEqual(format_sync_details(0.005), "Syncing: 0.5%")
+        self.assertEqual(format_sync_details(0.0, block_height=3201400), "Syncing: #3,201,400")
+        self.assertEqual(format_sync_details(0.0, None), "Syncing Blockchain")
+
+    def test_get_presence_assets_syncing(self):
+        with (
+            patch("main.DISCORD_LARGE_IMAGE", "gridcoin"),
+            patch("main.DISCORD_LARGE_TEXT", "Gridcoin Network"),
+            patch("main.DISCORD_SMALL_IMAGE_OFFLINE", "offline"),
+        ):
+            assets = get_presence_assets(
+                is_offline=False,
+                is_staking=False,
+                is_syncing=True,
+                sync_progress=0.984,
+            )
+            self.assertEqual(assets["small_image"], "offline")
+            self.assertEqual(assets["small_text"], "Syncing (98.4%)")
+
+    def test_get_peer_count_and_format_peers(self):
+        mock_grc = MagicMock()
+
+        # 1. From network_info dict argument
+        self.assertEqual(get_peer_count(mock_grc, {"connections": 18}), 18)
+
+        # 2. From getnetworkinfo RPC call
+        mock_grc.call.side_effect = lambda cmd: {"connections": 14} if cmd == "getnetworkinfo" else None
+        self.assertEqual(get_peer_count(mock_grc), 14)
+
+        # 3. getnetworkinfo fails, fallback to getinfo
+        def rpc_side_effect(cmd):
+            if cmd == "getnetworkinfo":
+                raise RuntimeError("Not found")
+            if cmd == "getinfo":
+                return {"connections": 9}
+            return None
+
+        mock_grc.call.side_effect = rpc_side_effect
+        self.assertEqual(get_peer_count(mock_grc), 9)
+
+        # 4. Both fail
+        mock_grc.call.side_effect = RuntimeError("RPC error")
+        self.assertIsNone(get_peer_count(mock_grc))
+
+        # 5. Format peers
+        self.assertEqual(format_peers(18), "Peers: 18")
+        self.assertEqual(format_peers(0), "Peers: 0")
+        self.assertEqual(format_peers(None), "Peers: 0")
 
 
 if __name__ == "__main__":
