@@ -1605,38 +1605,46 @@ class TestGridcoinDaemon(unittest.TestCase):
 
     def test_get_blockchain_sync_status(self):
         # 1. Initial block download active
-        syncing, prog = get_blockchain_sync_status({
-            "initialblockdownload": True,
-            "verificationprogress": 0.456,
-        })
+        syncing, prog = get_blockchain_sync_status(
+            {
+                "initialblockdownload": True,
+                "verificationprogress": 0.456,
+            }
+        )
         self.assertTrue(syncing)
         self.assertAlmostEqual(prog, 0.456)
 
         # 2. Behind network (verificationprogress < 0.9995 and headers > blocks + 5)
-        syncing, prog = get_blockchain_sync_status({
-            "initialblockdownload": False,
-            "verificationprogress": 0.985,
-            "blocks": 3200000,
-            "headers": 3201400,
-        })
+        syncing, prog = get_blockchain_sync_status(
+            {
+                "initialblockdownload": False,
+                "verificationprogress": 0.985,
+                "blocks": 3200000,
+                "headers": 3201400,
+            }
+        )
         self.assertTrue(syncing)
         self.assertAlmostEqual(prog, 0.985)
 
         # 3. Fully synced
-        syncing, prog = get_blockchain_sync_status({
-            "initialblockdownload": False,
-            "verificationprogress": 0.99999,
-            "blocks": 3201400,
-            "headers": 3201400,
-        })
+        syncing, prog = get_blockchain_sync_status(
+            {
+                "initialblockdownload": False,
+                "verificationprogress": 0.99999,
+                "blocks": 3201400,
+                "headers": 3201400,
+            }
+        )
         self.assertFalse(syncing)
         self.assertAlmostEqual(prog, 1.0)
 
         # 4. Fallback headers vs blocks when verificationprogress is missing
-        syncing, prog = get_blockchain_sync_status({
-            "blocks": 1000,
-            "headers": 2000,
-        })
+        syncing, prog = get_blockchain_sync_status(
+            {
+                "blocks": 1000,
+                "headers": 2000,
+            }
+        )
         self.assertTrue(syncing)
         self.assertAlmostEqual(prog, 0.5)
 
@@ -1672,7 +1680,9 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(get_peer_count(mock_grc, {"connections": 18}), 18)
 
         # 2. From getnetworkinfo RPC call
-        mock_grc.call.side_effect = lambda cmd: {"connections": 14} if cmd == "getnetworkinfo" else None
+        mock_grc.call.side_effect = lambda cmd: (
+            {"connections": 14} if cmd == "getnetworkinfo" else None
+        )
         self.assertEqual(get_peer_count(mock_grc), 14)
 
         # 3. getnetworkinfo fails, fallback to getinfo
