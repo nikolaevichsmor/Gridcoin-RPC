@@ -84,6 +84,7 @@ DEFAULT_SETTINGS = {
     "cycle_show_pool_share": False,
     "cycle_show_total_value": False,
     "cycle_show_price": False,
+    "cycle_show_peers": False,
 }
 
 
@@ -110,6 +111,7 @@ def load_settings() -> dict:
                     settings["cycle_show_pool_share"],
                     settings["cycle_show_total_value"],
                     settings["cycle_show_price"],
+                    settings["cycle_show_peers"],
                 ]
                 if not any(active_flags):
                     settings["cycle_show_reward"] = True
@@ -131,6 +133,7 @@ def save_settings() -> bool:
         "cycle_show_pool_share": cycle_show_pool_share,
         "cycle_show_total_value": cycle_show_total_value,
         "cycle_show_price": cycle_show_price,
+        "cycle_show_peers": cycle_show_peers,
     }
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -160,6 +163,7 @@ cycle_show_block: bool = _initial_settings["cycle_show_block"]
 cycle_show_pool_share: bool = _initial_settings["cycle_show_pool_share"]
 cycle_show_total_value: bool = _initial_settings["cycle_show_total_value"]
 cycle_show_price: bool = _initial_settings["cycle_show_price"]
+cycle_show_peers: bool = _initial_settings["cycle_show_peers"]
 update_event = threading.Event()
 
 
@@ -460,6 +464,56 @@ def is_wallet_staking(mining_or_staking_info: Any) -> Optional[bool]:
     return None
 
 
+def get_blockchain_sync_status(blockchain_info: Any) -> tuple[bool, float]:
+    """Detect if Gridcoin node is synchronizing blockchain and return (is_syncing, progress).
+
+    Returns (is_syncing, progress) where progress is float in range [0.0, 1.0].
+    """
+    if not isinstance(blockchain_info, dict):
+        return False, 1.0
+
+    ibd = blockchain_info.get("initialblockdownload")
+    if ibd is True:
+        prog = blockchain_info.get("verificationprogress", 0.0)
+        try:
+            return True, max(0.0, min(float(prog), 1.0))
+        except (ValueError, TypeError):
+            return True, 0.0
+
+    raw_prog = blockchain_info.get("verificationprogress")
+    if raw_prog is not None:
+        try:
+            prog_val = float(raw_prog)
+            if 0.0 <= prog_val < 0.9995:
+                blocks = blockchain_info.get("blocks")
+                headers = blockchain_info.get("headers")
+                if isinstance(headers, int) and isinstance(blocks, int) and headers > blocks + 5:
+                    return True, prog_val
+                elif prog_val < 0.999:
+                    return True, prog_val
+        except (ValueError, TypeError):
+            pass
+
+    blocks = blockchain_info.get("blocks")
+    headers = blockchain_info.get("headers")
+    if isinstance(blocks, int) and isinstance(headers, int) and headers > 0:
+        if headers - blocks > 20:
+            prog = blocks / headers
+            return True, max(0.0, min(prog, 1.0))
+
+    return False, 1.0
+
+
+def format_sync_details(sync_progress: float, block_height: Optional[int] = None) -> str:
+    """Format Line 1 status during blockchain sync."""
+    pct = sync_progress * 100.0
+    if 0.0 < pct < 100.0:
+        return f"Syncing: {pct:.1f}%"
+    if block_height and block_height > 0:
+        return f"Syncing: #{block_height:,}"
+    return "Syncing Blockchain"
+
+
 def format_details(
     active_coins: float,
     is_staking: Optional[bool] = None,
@@ -482,7 +536,12 @@ def format_details(
     return f"Staking: {active_coins:,.2f} GRC"
 
 
-def get_presence_assets(is_offline: bool = False, is_staking: Optional[bool] = None) -> dict:
+def get_presence_assets(
+    is_offline: bool = False,
+    is_staking: Optional[bool] = None,
+    is_syncing: bool = False,
+    sync_progress: float = 1.0,
+) -> dict:
     """Return dictionary of Discord presence image assets and hover tooltips."""
     assets = {}
     if DISCORD_LARGE_IMAGE:
@@ -494,6 +553,13 @@ def get_presence_assets(is_offline: bool = False, is_staking: Optional[bool] = N
         if DISCORD_SMALL_IMAGE_OFFLINE:
             assets["small_image"] = DISCORD_SMALL_IMAGE_OFFLINE
             assets["small_text"] = "Wallet Offline"
+    elif is_syncing:
+        if DISCORD_SMALL_IMAGE_OFFLINE:
+            assets["small_image"] = DISCORD_SMALL_IMAGE_OFFLINE
+            pct = sync_progress * 100.0
+            assets["small_text"] = (
+                f"Syncing ({pct:.1f}%)" if 0.0 < pct < 100.0 else "Syncing Blockchain"
+            )
     elif is_staking is False:
         if DISCORD_SMALL_IMAGE_OFFLINE:
             assets["small_image"] = DISCORD_SMALL_IMAGE_OFFLINE
@@ -799,6 +865,38 @@ def format_grc_price(price_usd: Optional[float]) -> str:
     return f"GRC Price: ${price_usd:.5f}"
 
 
+def get_peer_count(grc: GridcoinRPC, network_info: Optional[dict] = None) -> Optional[int]:
+    """Fetch number of connected network peers from getnetworkinfo or getinfo."""
+    if isinstance(network_info, dict) and "connections" in network_info:
+        try:
+            return int(network_info["connections"])
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        net = grc.call("getnetworkinfo")
+        if isinstance(net, dict) and "connections" in net:
+            return int(net["connections"])
+    except Exception:
+        pass
+
+    try:
+        info = grc.call("getinfo")
+        if isinstance(info, dict) and "connections" in info:
+            return int(info["connections"])
+    except Exception:
+        pass
+
+    return None
+
+
+def format_peers(peer_count: Optional[int]) -> str:
+    """Format network peer count string."""
+    if peer_count is None:
+        return "Peers: 0"
+    return f"Peers: {peer_count}"
+
+
 def get_alternating_state(
     cycle: int,
     switch_cycles: int,
@@ -810,6 +908,7 @@ def get_alternating_state(
     pool_share_str: Optional[str] = None,
     total_value_str: Optional[str] = None,
     price_str: Optional[str] = None,
+    peers_str: Optional[str] = None,
     show_reward: bool = True,
     show_difficulty: bool = True,
     show_rac: bool = True,
@@ -818,6 +917,7 @@ def get_alternating_state(
     show_pool_share: bool = False,
     show_total_value: bool = False,
     show_price: bool = False,
+    show_peers: bool = False,
 ) -> str:
     """Alternate between active display metrics every switch_cycles update cycles."""
     candidates = []
@@ -837,6 +937,8 @@ def get_alternating_state(
         candidates.append(total_value_str if total_value_str is not None else "Total Value: $0.00")
     if show_price:
         candidates.append(price_str if price_str is not None else "GRC Price: N/A")
+    if show_peers:
+        candidates.append(peers_str if peers_str is not None else "Peers: 0")
 
     if not candidates:
         if show_rac:
@@ -849,6 +951,8 @@ def get_alternating_state(
             candidates.append("Total Value: $0.00")
         elif show_price:
             candidates.append("GRC Price: N/A")
+        elif show_peers:
+            candidates.append("Peers: 0")
         elif show_mag:
             candidates.append("Magnitude: None")
         elif show_difficulty:
@@ -893,7 +997,7 @@ def toggle_stat(stat_name: str) -> bool:
     """
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
-    global cycle_show_total_value, cycle_show_price
+    global cycle_show_total_value, cycle_show_price, cycle_show_peers
 
     active_count = sum(
         [
@@ -905,6 +1009,7 @@ def toggle_stat(stat_name: str) -> bool:
             cycle_show_pool_share,
             cycle_show_total_value,
             cycle_show_price,
+            cycle_show_peers,
         ]
     )
     toggled = False
@@ -959,7 +1064,13 @@ def toggle_stat(stat_name: str) -> bool:
         cycle_show_pool_share = not cycle_show_pool_share
         logger.info(f"Toggled Pool Share: {cycle_show_pool_share}")
         toggled = True
-    elif stat_name in ("total_value", "value", "Total Value ($)", "Total Value (USD)", "Total Value"):
+    elif stat_name in (
+        "total_value",
+        "value",
+        "Total Value ($)",
+        "Total Value (USD)",
+        "Total Value",
+    ):
         if cycle_show_total_value and active_count <= 1:
             logger.info("Cannot disable Total Value: at least one display stat must remain active.")
             return False
@@ -972,6 +1083,15 @@ def toggle_stat(stat_name: str) -> bool:
             return False
         cycle_show_price = not cycle_show_price
         logger.info(f"Toggled GRC Price: {cycle_show_price}")
+        toggled = True
+    elif stat_name in ("peers", "connections", "Network Peers", "Peers"):
+        if cycle_show_peers and active_count <= 1:
+            logger.info(
+                "Cannot disable Network Peers: at least one display stat must remain active."
+            )
+            return False
+        cycle_show_peers = not cycle_show_peers
+        logger.info(f"Toggled Network Peers: {cycle_show_peers}")
         toggled = True
 
     if toggled:
@@ -1036,6 +1156,7 @@ def update_tray_menu_checks(systray) -> None:
         "Pool Share": cycle_show_pool_share,
         "Total Value ($)": cycle_show_total_value,
         "GRC Price ($)": cycle_show_price,
+        "Network Peers": cycle_show_peers,
     }
     for name, is_active in stat_flags.items():
         if name in id_map:
@@ -1211,7 +1332,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
     global running, presence_enabled, hide_balance
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
-    global cycle_show_total_value, cycle_show_price
+    global cycle_show_total_value, cycle_show_price, cycle_show_peers
 
     last_stake_time: Optional[int] = None
     last_tx_check = 0.0
@@ -1255,9 +1376,23 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
 
             pool_share_str = format_pool_share(active_coins, net_weight)
 
-            details_str = format_details(
-                active_coins, is_staking=is_staking, hide_balance=hide_balance
-            )
+            # Check blockchain sync status
+            is_syncing = False
+            sync_progress = 1.0
+            try:
+                blockchain_info = grc.call("getblockchaininfo")
+                is_syncing, sync_progress = get_blockchain_sync_status(blockchain_info)
+                if block_height is None and isinstance(blockchain_info, dict):
+                    block_height = get_block_height(blockchain_info)
+            except Exception as err:
+                logger.debug(f"Failed to fetch getblockchaininfo: {err}")
+
+            if is_syncing:
+                details_str = format_sync_details(sync_progress, block_height)
+            else:
+                details_str = format_details(
+                    active_coins, is_staking=is_staking, hide_balance=hide_balance
+                )
 
             # Check for top BOINC project RAC and total magnitude periodically
             current_time = time.time()
@@ -1283,6 +1418,11 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                     total_balance = get_total_balance(grc, active_coins)
                     total_value_str = format_total_value_usd(total_balance, price_usd)
 
+            peers_str = None
+            if cycle_show_peers:
+                peer_count = get_peer_count(grc)
+                peers_str = format_peers(peer_count)
+
             # 2. Alternating State (cycles between all active metrics)
             state_str = get_alternating_state(
                 cycle_count,
@@ -1295,6 +1435,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 pool_share_str=pool_share_str,
                 total_value_str=total_value_str,
                 price_str=price_str,
+                peers_str=peers_str,
                 show_reward=cycle_show_reward,
                 show_difficulty=cycle_show_difficulty,
                 show_rac=cycle_show_rac,
@@ -1303,6 +1444,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 show_pool_share=cycle_show_pool_share,
                 show_total_value=cycle_show_total_value,
                 show_price=cycle_show_price,
+                show_peers=cycle_show_peers,
             )
             cycle_count += 1
 
@@ -1338,7 +1480,12 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 if buttons:
                     update_payload["buttons"] = buttons
 
-                assets = get_presence_assets(is_offline=False, is_staking=is_staking)
+                assets = get_presence_assets(
+                    is_offline=False,
+                    is_staking=is_staking,
+                    is_syncing=is_syncing,
+                    sync_progress=sync_progress,
+                )
                 if assets:
                     update_payload.update(assets)
 
@@ -1500,6 +1647,11 @@ def main(argv: Optional[list] = None):
             trigger_presence_update()
         update_tray_menu_checks(systray)
 
+    def on_toggle_peers(systray):
+        if toggle_stat("peers"):
+            trigger_presence_update()
+        update_tray_menu_checks(systray)
+
     def on_tray_autostart(systray):
         new_state = not is_autostart_enabled()
         if set_autostart(new_state):
@@ -1534,6 +1686,7 @@ def main(argv: Optional[list] = None):
                 ("Pool Share", None, on_toggle_pool_share),
                 ("Total Value ($)", None, on_toggle_total_value),
                 ("GRC Price ($)", None, on_toggle_price),
+                ("Network Peers", None, on_toggle_peers),
             )
             menu_options = (
                 ("Turn Off / On Presence", None, on_tray_toggle),
