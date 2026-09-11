@@ -680,7 +680,9 @@ class TestGridcoinDaemon(unittest.TestCase):
         shell = shutil.which("powershell") or shutil.which("pwsh")
         self.assertIsNotNone(shell)
         with tempfile.TemporaryDirectory(prefix="grc review [test] ") as tmpdir:
-            root = Path(tmpdir)
+            # Use one canonical spelling in fixtures and the PowerShell script path.
+            # Hosted Windows runners can supply TEMP using an 8.3 user-directory alias.
+            root = Path(tmpdir).resolve()
             scripts = root / "scripts"
             scripts.mkdir()
             script = scripts / "stop_background.ps1"
@@ -712,7 +714,8 @@ class TestGridcoinDaemon(unittest.TestCase):
                 "$ErrorActionPreference = 'Stop'\n"
                 f"function Get-CimInstance {{ $items = Get-Content -LiteralPath {quote(fixtures)} -Raw | ConvertFrom-Json; $items }}\n"
                 "function Stop-Process { [CmdletBinding()] param([int]$Id, [switch]$Force) Write-Output ('STOPPED=' + $Id) }\n"
-                f"& {quote(script)}\n"
+                f". {quote(script)}\n"
+                "Write-Output ('PROJECT_ROOT=' + $ProjectRoot)\n"
             )
             result = subprocess.run(
                 [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
@@ -720,7 +723,10 @@ class TestGridcoinDaemon(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             stopped = [line for line in result.stdout.splitlines() if line.startswith("STOPPED=")]
-            self.assertEqual(stopped, ["STOPPED=1", "STOPPED=4", "STOPPED=9", "STOPPED=10"], result.stdout)
+            self.assertEqual(
+                stopped, ["STOPPED=1", "STOPPED=4", "STOPPED=9", "STOPPED=10"],
+                f"Fixture root: {root}\n{result.stdout}\n{result.stderr}",
+            )
 
     def test_get_newest_txid(self):
         mock_grc = MagicMock(spec=GridcoinRPC)
