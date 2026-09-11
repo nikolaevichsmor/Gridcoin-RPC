@@ -24,4 +24,6 @@ dist_build/
 # User settings & local IDE configs
 settings.json
 .vscode/settings.json
+AGENTS.md
+GEMINI.md
 
