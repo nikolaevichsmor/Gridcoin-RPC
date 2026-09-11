@@ -157,12 +157,13 @@ if ($NoLaunch) {
         if ($IsBinary) {
             Start-Process -FilePath $BinaryPath
         } else {
+            $MainScript = Join-Path $ProjectRoot "main.py"
             $PythonDir = Split-Path (Get-Command $PythonCmd).Source -Parent
             $PythonW = Join-Path $PythonDir "pythonw.exe"
             if (Test-Path $PythonW) {
-                Start-Process -FilePath $PythonW -ArgumentList "main.py" -WorkingDirectory $ProjectRoot
+                Start-Process -FilePath $PythonW -ArgumentList "`"$MainScript`"" -WorkingDirectory $ProjectRoot -WindowStyle Hidden
             } else {
-                Start-Process -FilePath $PythonCmd -ArgumentList "main.py" -WorkingDirectory $ProjectRoot
+                Start-Process -FilePath $PythonCmd -ArgumentList "`"$MainScript`"" -WorkingDirectory $ProjectRoot -WindowStyle Hidden
             }
         }
         Write-Host "  Gridcoin-RPC launched! Look for the Gridcoin icon in your system tray." -ForegroundColor Green

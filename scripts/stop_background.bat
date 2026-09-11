@@ -1,5 +1,4 @@
 @echo off
 echo Stopping Gridcoin Discord RPC daemon...
-powershell -NoProfile -Command "Get-Process -Name 'Gridcoin-RPC' -ErrorAction SilentlyContinue | Stop-Process -Force; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*main.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; Write-Host 'Stopped PID' $_.ProcessId }"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop_background.ps1"
 echo Done.
-

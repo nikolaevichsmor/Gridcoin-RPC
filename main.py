@@ -138,6 +138,10 @@ def save_settings() -> bool:
         "cycle_show_peers": cycle_show_peers,
     }
     try:
+        settings = load_settings()
+        for key in ("rpc_host", "rpc_port", "rpc_user", "rpc_password"):
+            if key in settings:
+                data[key] = settings[key]
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         return True
@@ -979,9 +983,6 @@ def handle_exit_signal(signum, frame=None):
     logger.info(f"Received exit signal {sig_name}. Shutting down gracefully...")
     running = False
     trigger_presence_update()
-    if discord_mgr:
-        discord_mgr.close()
-    sys.exit(0)
 
 
 try:
@@ -1230,7 +1231,8 @@ def scan_new_stakes(
     Returns (timestamp of the newest stake among the entries newer than the
     marker, or None; txid of the newest entry seen, or None). Cost is one page
     when nothing new has happened, and proportional to the number of new
-    entries otherwise, so no window of entries is ever skipped.
+    entries otherwise. An incomplete scan returns no new marker so the caller
+    retries from its previous marker without skipping unread entries.
     """
     best_ts: Optional[int] = None
     new_marker: Optional[str] = None
@@ -1240,8 +1242,10 @@ def scan_new_stakes(
             txs = grc.call("listtransactions", ["*", page_size, skip])
         except Exception as err:
             logger.warning(f"Failed to scan for new stakes: {err}")
-            break
-        if not isinstance(txs, list) or not txs:
+            return best_ts, None
+        if not isinstance(txs, list):
+            return best_ts, None
+        if not txs:
             break
         for tx in reversed(txs):  # listtransactions is oldest-first; walk newest-first
             if not isinstance(tx, dict):
@@ -1262,6 +1266,7 @@ def scan_new_stakes(
         logger.warning(
             f"Stake scan hit the {max_entries}-entry cap without finding marker {marker_txid}"
         )
+        return best_ts, None
     return best_ts, new_marker
 
 
@@ -1330,7 +1335,15 @@ class DiscordPresenceManager:
 
 
 def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
-    """Background thread worker that polls Gridcoin RPC and updates Discord."""
+    """Own the Discord connection for its entire lifetime in one thread."""
+    try:
+        _polling_loop(grc, discord)
+    finally:
+        discord.close()
+
+
+def _polling_loop(grc: GridcoinRPC, discord: DiscordPresenceManager):
+    """Poll Gridcoin and serialize presence updates, pauses, and shutdown."""
     global running, presence_enabled, hide_balance
     global cycle_show_reward, cycle_show_difficulty, cycle_show_rac
     global cycle_show_mag, cycle_show_block, cycle_show_pool_share
@@ -1347,6 +1360,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
 
     while running:
         if not presence_enabled:
+            discord.close()
             for _ in range(10):
                 if not running or presence_enabled or update_event.is_set():
                     break
@@ -1470,7 +1484,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 last_tx_check = current_time
 
             # 4. Update Rich Presence
-            if presence_enabled:
+            if running and presence_enabled:
                 update_payload = {
                     "details": details_str,
                     "state": state_str,
@@ -1498,7 +1512,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                 )
 
         except PermissionError as auth_err:
-            if presence_enabled:
+            if running and presence_enabled:
                 logger.error(
                     f"RPC authentication failed: {auth_err}. Please verify rpc_user and rpc_password."
                 )
@@ -1514,7 +1528,7 @@ def polling_worker(grc: GridcoinRPC, discord: DiscordPresenceManager):
                     offline_payload.update(assets)
                 discord.update(**offline_payload)
         except ConnectionError as rpc_err:
-            if presence_enabled:
+            if running and presence_enabled:
                 logger.warning(f"Gridcoin wallet unreachable ({rpc_err}). Setting offline status.")
                 offline_payload = {
                     "details": "Wallet Offline",
@@ -1568,7 +1582,6 @@ def main(argv: Optional[list] = None):
 
     grc = GridcoinRPC(RPC_HOST, RPC_PORT, RPC_USER, RPC_PASS)
     discord_mgr = DiscordPresenceManager(CLIENT_ID)
-    discord_mgr.connect()
 
     # Start background polling thread
     worker_thread = threading.Thread(target=polling_worker, args=(grc, discord_mgr), daemon=True)
@@ -1597,8 +1610,6 @@ def main(argv: Optional[list] = None):
         save_settings()
         state_msg = "enabled" if presence_enabled else "paused"
         logger.info(f"Presence {state_msg} via system tray.")
-        if not presence_enabled and discord_mgr:
-            discord_mgr.clear()
         trigger_presence_update()
 
     def on_tray_toggle_hide_balance(systray):
@@ -1672,8 +1683,6 @@ def main(argv: Optional[list] = None):
         logger.info("Exiting application via system tray.")
         running = False
         trigger_presence_update()
-        if discord_mgr:
-            discord_mgr.close()
 
     tray = None
     if not args.headless and sys.platform == "win32":
@@ -1733,8 +1742,9 @@ def main(argv: Optional[list] = None):
         while running:
             time.sleep(1)
     finally:
-        if discord_mgr:
-            discord_mgr.close()
+        running = False
+        trigger_presence_update()
+        worker_thread.join()
         if tray:
             try:
                 tray.shutdown()
@@ -1747,6 +1757,4 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logger.info("Daemon stopped by user.")
-        if discord_mgr:
-            discord_mgr.close()
         sys.exit(0)

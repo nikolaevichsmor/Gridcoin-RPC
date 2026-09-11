@@ -2,7 +2,11 @@
 
 import io
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -561,6 +565,161 @@ class TestGridcoinDaemon(unittest.TestCase):
         mock_grc = MagicMock(spec=GridcoinRPC)
         mock_grc.call.side_effect = ConnectionError("Node unreachable")
         self.assertEqual(scan_new_stakes(mock_grc, "M"), (None, None))
+
+    def test_scan_new_stakes_retries_unread_pages_after_failure(self):
+        txs = [
+            {"txid": "old", "category": "receive"},
+            {"txid": "stake", "category": "generate", "time": 200, "confirmations": 1},
+            {"txid": "new", "category": "receive"},
+        ]
+        for failure in (ConnectionError("page 2 failed"), {"invalid": "response"}):
+            with self.subTest(failure=failure):
+                grc = MagicMock(spec=GridcoinRPC)
+                grc.call.side_effect = [[txs[-1]], failure]
+                timestamp, marker = scan_new_stakes(grc, "old", page_size=1)
+                self.assertIsNone(timestamp)
+                self.assertIsNone(marker)
+                grc.call.side_effect = lambda m, p: self._listtransactions_like(txs)(p)
+                self.assertEqual(
+                    scan_new_stakes(grc, marker or "old", page_size=1), (200, "new")
+                )
+
+    def test_scan_new_stakes_does_not_advance_marker_at_cap(self):
+        grc = MagicMock(spec=GridcoinRPC)
+        grc.call.return_value = [
+            {"txid": "new", "category": "generate", "time": 200, "confirmations": 1}
+        ]
+        self.assertEqual(scan_new_stakes(grc, "old", page_size=1, max_entries=1), (200, None))
+
+    def test_worker_owns_discord_during_pause_resume_and_shutdown(self):
+        import main
+
+        updating = threading.Event()
+        release_update = threading.Event()
+        paused = threading.Event()
+        resumed = threading.Event()
+        release_shutdown = threading.Event()
+        calls = []
+
+        def record(name):
+            calls.append((name, threading.get_ident()))
+
+        instance = MagicMock()
+        instance.connect.side_effect = lambda: record("connect")
+        instance.clear.side_effect = lambda: record("clear")
+
+        def close():
+            record("close")
+            paused.set()
+
+        def update(**kwargs):
+            record("update")
+            if not updating.is_set():
+                updating.set()
+                if not release_update.wait(5):
+                    raise RuntimeError("test timed out waiting to pause")
+            else:
+                resumed.set()
+                if not release_shutdown.wait(5):
+                    raise RuntimeError("test timed out waiting to stop")
+
+        instance.close.side_effect = close
+        instance.update.side_effect = update
+
+        def create_presence(client_id):
+            record("create")
+            return instance
+
+        grc = MagicMock(spec=GridcoinRPC)
+        grc.call.side_effect = lambda method, params=None: [] if method == "listtransactions" else {}
+        manager = DiscordPresenceManager("test")
+        with (
+            patch("main.Presence", side_effect=create_presence),
+            patch("main.running", True),
+            patch("main.presence_enabled", True),
+            patch("main.cycle_show_total_value", False),
+            patch("main.cycle_show_price", False),
+            patch("main.update_event", threading.Event()),
+        ):
+            worker = threading.Thread(target=main.polling_worker, args=(grc, manager))
+            worker.start()
+            try:
+                self.assertTrue(updating.wait(5))
+                main.presence_enabled = False
+                main.trigger_presence_update()
+                release_update.set()
+                self.assertTrue(paused.wait(5))
+                main.presence_enabled = True
+                main.trigger_presence_update()
+                self.assertTrue(resumed.wait(5))
+            finally:
+                main.running = False
+                main.trigger_presence_update()
+                release_update.set()
+                release_shutdown.set()
+                worker.join(5)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual({ident for _, ident in calls}, {worker.ident})
+        self.assertEqual(
+            [name for name, _ in calls],
+            ["create", "connect", "update", "clear", "close"] * 2,
+        )
+
+    def test_worker_closes_discord_on_unexpected_exit(self):
+        import main
+
+        discord = MagicMock(spec=DiscordPresenceManager)
+        with patch("main._polling_loop", side_effect=RuntimeError("unexpected exit")):
+            with self.assertRaises(RuntimeError):
+                main.polling_worker(MagicMock(), discord)
+        discord.close.assert_called_once()
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows process selection")
+    def test_stop_script_targets_only_this_project(self):
+        shell = shutil.which("powershell") or shutil.which("pwsh")
+        self.assertIsNotNone(shell)
+        with tempfile.TemporaryDirectory(prefix="grc review [test] ") as tmpdir:
+            root = Path(tmpdir)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            script = scripts / "stop_background.ps1"
+            shutil.copyfile(PROJECT_ROOT / "scripts" / script.name, script)
+            main_path = str(root / "main.py")
+            binary = str(root / "Gridcoin-RPC.exe")
+            processes = [
+                (1, "pythonw.exe", f'pythonw.exe "{main_path}"', None),
+                (2, "python.exe", 'python.exe "C:\\other\\main.py"', None),
+                (3, "powershell.exe", f'powershell -Command "{main_path}"', None),
+                (4, "Gridcoin-RPC.exe", None, binary),
+                (5, "Gridcoin-RPC.exe", None, "C:\\other\\Gridcoin-RPC.exe"),
+                (6, "python.exe", f'python.exe "{main_path}.bak"', None),
+                (7, "python.exe", f'python.exe other.py "{main_path}"', None),
+                (8, "python.exe", 'python.exe main.py', None),
+                (9, "pythonw.exe", f'"C:\\Python Dir\\pythonw.exe" "{scripts / "main.pyw"}"', None),
+                (10, "python.exe", f'python.exe "{main_path}" --headless', None),
+            ]
+            fixtures = root / "processes.json"
+            fixtures.write_text(json.dumps([
+                dict(ProcessId=pid, Name=name, CommandLine=cmd, ExecutablePath=exe)
+                for pid, name, cmd, exe in processes
+            ]), encoding="utf-8")
+
+            def quote(path):
+                return "'" + str(path).replace("'", "''") + "'"
+
+            command = (
+                "$ErrorActionPreference = 'Stop'\n"
+                f"function Get-CimInstance {{ $items = Get-Content -LiteralPath {quote(fixtures)} -Raw | ConvertFrom-Json; $items }}\n"
+                "function Stop-Process { [CmdletBinding()] param([int]$Id, [switch]$Force) Write-Output ('STOPPED=' + $Id) }\n"
+                f"& {quote(script)}\n"
+            )
+            result = subprocess.run(
+                [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
+                capture_output=True, text=True, timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            stopped = [line for line in result.stdout.splitlines() if line.startswith("STOPPED=")]
+            self.assertEqual(stopped, ["STOPPED=1", "STOPPED=4", "STOPPED=9", "STOPPED=10"], result.stdout)
 
     def test_get_newest_txid(self):
         mock_grc = MagicMock(spec=GridcoinRPC)
@@ -1295,6 +1454,20 @@ class TestGridcoinDaemon(unittest.TestCase):
                     )
                 enforced = load_settings()
                 self.assertTrue(enforced["cycle_show_reward"])
+
+    def test_save_settings_preserves_remote_rpc_config(self):
+        rpc_settings = {
+            "rpc_host": "nas.local", "rpc_port": 15717,
+            "rpc_user": "test", "rpc_password": "test-password",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings_path = Path(tmpdir) / "settings.json"
+            settings_path.write_text(json.dumps(rpc_settings), encoding="utf-8")
+            with patch("main.SETTINGS_FILE", settings_path), patch("main.hide_balance", False):
+                self.assertTrue(save_settings())
+                loaded = load_settings()
+            self.assertEqual({key: loaded[key] for key in rpc_settings}, rpc_settings)
+            self.assertFalse(loaded["hide_balance"])
 
     def test_total_magnitude_extraction(self):
         # 1. From explainmagnitude list with Total project
