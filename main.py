@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import ctypes
 import json
@@ -12,7 +14,7 @@ import urllib.request
 import webbrowser
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from dotenv import load_dotenv
 from pypresence import Presence
@@ -464,7 +466,7 @@ def is_wallet_staking(mining_or_staking_info: Any) -> Optional[bool]:
     return None
 
 
-def get_blockchain_sync_status(blockchain_info: Any) -> tuple[bool, float]:
+def get_blockchain_sync_status(blockchain_info: Any) -> Tuple[bool, float]:
     """Detect if Gridcoin node is synchronizing blockchain and return (is_syncing, progress).
 
     Returns (is_syncing, progress) where progress is float in range [0.0, 1.0].
@@ -1222,7 +1224,7 @@ def scan_new_stakes(
     marker_txid: Optional[str],
     page_size: int = 50,
     max_entries: int = 10000,
-) -> "tuple[Optional[int], Optional[str]]":
+) -> Tuple[Optional[int], Optional[str]]:
     """Page back through listtransactions (newest first) until marker_txid is seen.
 
     Returns (timestamp of the newest stake among the entries newer than the
