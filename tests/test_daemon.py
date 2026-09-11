@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -218,15 +219,16 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(get_alternating_state(2, 2, reward, diff, None), "Difficulty: 12.34")
 
     def test_get_presence_buttons(self):
-        with (
-            patch(
-                "main.GITHUB_REPO_URL",
-                "https://github.com/nikolaevichsmor/Gridcoin-RPC",
-            ),
-            patch("main.GITHUB_BUTTON_LABEL", "GitHub"),
-            patch("main.GRIDCOIN_WEBSITE_URL", "https://gridcoin.us/"),
-            patch("main.GRIDCOIN_WEBSITE_LABEL", "What is this?"),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "main.GITHUB_REPO_URL",
+                    "https://github.com/nikolaevichsmor/Gridcoin-RPC",
+                )
+            )
+            stack.enter_context(patch("main.GITHUB_BUTTON_LABEL", "GitHub"))
+            stack.enter_context(patch("main.GRIDCOIN_WEBSITE_URL", "https://gridcoin.us/"))
+            stack.enter_context(patch("main.GRIDCOIN_WEBSITE_LABEL", "What is this?"))
             buttons = get_presence_buttons()
             self.assertEqual(
                 buttons,
@@ -239,13 +241,14 @@ class TestGridcoinDaemon(unittest.TestCase):
                 ],
             )
 
-        with (
-            patch(
-                "main.GITHUB_REPO_URL",
-                "https://github.com/nikolaevichsmor/Gridcoin-RPC",
-            ),
-            patch("main.GRIDCOIN_WEBSITE_URL", ""),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "main.GITHUB_REPO_URL",
+                    "https://github.com/nikolaevichsmor/Gridcoin-RPC",
+                )
+            )
+            stack.enter_context(patch("main.GRIDCOIN_WEBSITE_URL", ""))
             buttons = get_presence_buttons()
             self.assertEqual(
                 buttons,
@@ -469,12 +472,11 @@ class TestGridcoinDaemon(unittest.TestCase):
 
         mock_discord.update.side_effect = on_update
 
-        with (
-            patch("main.running", True),
-            patch("main.presence_enabled", True),
-            patch("main.time.time", side_effect=lambda: clock["now"]),
-            patch("main.time.sleep"),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch("main.running", True))
+            stack.enter_context(patch("main.presence_enabled", True))
+            stack.enter_context(patch("main.time.time", side_effect=lambda: clock["now"]))
+            stack.enter_context(patch("main.time.sleep"))
             main.polling_worker(mock_grc, mock_discord)
 
         return starts, lt_params
@@ -633,14 +635,13 @@ class TestGridcoinDaemon(unittest.TestCase):
         grc = MagicMock(spec=GridcoinRPC)
         grc.call.side_effect = lambda method, params=None: [] if method == "listtransactions" else {}
         manager = DiscordPresenceManager("test")
-        with (
-            patch("main.Presence", side_effect=create_presence),
-            patch("main.running", True),
-            patch("main.presence_enabled", True),
-            patch("main.cycle_show_total_value", False),
-            patch("main.cycle_show_price", False),
-            patch("main.update_event", threading.Event()),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch("main.Presence", side_effect=create_presence))
+            stack.enter_context(patch("main.running", True))
+            stack.enter_context(patch("main.presence_enabled", True))
+            stack.enter_context(patch("main.cycle_show_total_value", False))
+            stack.enter_context(patch("main.cycle_show_price", False))
+            stack.enter_context(patch("main.update_event", threading.Event()))
             worker = threading.Thread(target=main.polling_worker, args=(grc, manager))
             worker.start()
             try:
@@ -1283,11 +1284,10 @@ class TestGridcoinDaemon(unittest.TestCase):
 
         mock_u32 = MagicMock()
         mock_windll = MagicMock(user32=mock_u32)
-        with (
-            patch("sys.platform", "win32"),
-            patch("main.is_autostart_enabled", return_value=True),
-            patch.object(ctypes, "windll", mock_windll, create=True),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch("sys.platform", "win32"))
+            stack.enter_context(patch("main.is_autostart_enabled", return_value=True))
+            stack.enter_context(patch.object(ctypes, "windll", mock_windll, create=True))
             update_tray_menu_checks(mock_systray)
             # Should have called CheckMenuItem for Start with Windows, Hide Balance and all 9 stats
             self.assertEqual(mock_u32.CheckMenuItem.call_count, 11)
@@ -1348,12 +1348,11 @@ class TestGridcoinDaemon(unittest.TestCase):
 
     def test_get_presence_assets(self):
         # 1. Staking active
-        with (
-            patch("main.DISCORD_LARGE_IMAGE", "gridcoin"),
-            patch("main.DISCORD_LARGE_TEXT", "Gridcoin Network"),
-            patch("main.DISCORD_SMALL_IMAGE_STAKING", "staking"),
-            patch("main.DISCORD_SMALL_IMAGE_OFFLINE", "offline"),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch("main.DISCORD_LARGE_IMAGE", "gridcoin"))
+            stack.enter_context(patch("main.DISCORD_LARGE_TEXT", "Gridcoin Network"))
+            stack.enter_context(patch("main.DISCORD_SMALL_IMAGE_STAKING", "staking"))
+            stack.enter_context(patch("main.DISCORD_SMALL_IMAGE_OFFLINE", "offline"))
             assets = get_presence_assets(is_offline=False, is_staking=True)
             self.assertEqual(assets["large_image"], "gridcoin")
             self.assertEqual(assets["large_text"], "Gridcoin Network")
@@ -1371,11 +1370,10 @@ class TestGridcoinDaemon(unittest.TestCase):
             self.assertEqual(assets_offline["small_text"], "Wallet Offline")
 
         # 4. When image configs are empty string
-        with (
-            patch("main.DISCORD_LARGE_IMAGE", ""),
-            patch("main.DISCORD_SMALL_IMAGE_STAKING", ""),
-            patch("main.DISCORD_SMALL_IMAGE_OFFLINE", ""),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch("main.DISCORD_LARGE_IMAGE", ""))
+            stack.enter_context(patch("main.DISCORD_SMALL_IMAGE_STAKING", ""))
+            stack.enter_context(patch("main.DISCORD_SMALL_IMAGE_OFFLINE", ""))
             self.assertEqual(get_presence_assets(is_offline=False, is_staking=True), {})
 
     def test_settings_persistence(self):
@@ -1385,13 +1383,12 @@ class TestGridcoinDaemon(unittest.TestCase):
             tmp_settings = Path(tmpdir) / "settings.json"
             with patch("main.SETTINGS_FILE", tmp_settings):
                 # Save settings
-                with (
-                    patch("main.presence_enabled", False),
-                    patch("main.hide_balance", False),
-                    patch("main.cycle_show_reward", False),
-                    patch("main.cycle_show_difficulty", True),
-                    patch("main.cycle_show_rac", True),
-                ):
+                with ExitStack() as stack:
+                    stack.enter_context(patch("main.presence_enabled", False))
+                    stack.enter_context(patch("main.hide_balance", False))
+                    stack.enter_context(patch("main.cycle_show_reward", False))
+                    stack.enter_context(patch("main.cycle_show_difficulty", True))
+                    stack.enter_context(patch("main.cycle_show_rac", True))
                     saved = save_settings()
                     self.assertTrue(saved)
                     self.assertTrue(tmp_settings.is_file())
@@ -1832,11 +1829,10 @@ class TestGridcoinDaemon(unittest.TestCase):
         self.assertEqual(format_sync_details(0.0, None), "Syncing Blockchain")
 
     def test_get_presence_assets_syncing(self):
-        with (
-            patch("main.DISCORD_LARGE_IMAGE", "gridcoin"),
-            patch("main.DISCORD_LARGE_TEXT", "Gridcoin Network"),
-            patch("main.DISCORD_SMALL_IMAGE_OFFLINE", "offline"),
-        ):
+        with ExitStack() as stack:
+            stack.enter_context(patch("main.DISCORD_LARGE_IMAGE", "gridcoin"))
+            stack.enter_context(patch("main.DISCORD_LARGE_TEXT", "Gridcoin Network"))
+            stack.enter_context(patch("main.DISCORD_SMALL_IMAGE_OFFLINE", "offline"))
             assets = get_presence_assets(
                 is_offline=False,
                 is_staking=False,
